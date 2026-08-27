@@ -1,12 +1,35 @@
 services:
+  db:
+    image: postgis/postgis:16-3.4
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-energygrid}
+      POSTGRES_USER: ${POSTGRES_USER:-energygrid}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-energygrid}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   api:
     build: .
     env_file:
       - .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-energygrid}:${POSTGRES_PASSWORD:-energygrid}@db:5432/${POSTGRES_DB:-energygrid}
     ports:
       - "8000:8000"
     volumes:
       - ./app:/app/app
+    depends_on:
+      db:
+        condition: service_healthy
 
-# PostgreSQL/PostGIS and Redis are added in Phase 1 and Phase 5.
+volumes:
+  postgres_data:
 
+# Redis is added in Phase 5.

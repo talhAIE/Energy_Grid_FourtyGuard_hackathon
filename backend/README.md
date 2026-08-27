@@ -28,6 +28,8 @@
    FORTYGUARD_API_KEY=your_fortyguard_key
    ```
 
+   Keep the provided `POSTGRES_*` and `DATABASE_URL` values for a local database.
+
 5. Start the API:
 
    ```powershell
@@ -49,3 +51,14 @@ Docker is optional for Phase 0. Once Docker Desktop is installed, start the API 
 docker compose up --build
 ```
 
+## Phase 1 database setup
+
+Docker Desktop is required only for this local Postgres/PostGIS option. From `backend/`:
+
+```powershell
+docker compose up --build -d
+docker compose exec api alembic upgrade head
+docker compose exec api python -m app.scripts.seed_city
+```
+
+Then call `GET /api/v1/health`. Its `dependencies.database` field should be `healthy`.
