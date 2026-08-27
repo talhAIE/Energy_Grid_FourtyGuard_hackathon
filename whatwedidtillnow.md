@@ -28,7 +28,8 @@ This file tracks completed work and how it was implemented. Update it at the end
 | 3 - EIA ingestion | Implemented; manual live-data QA pending | Configurable EIA/ERCOT hourly demand import, normalized storage, duplicate protection, API routes, and audit trail |
 | 4 - FortyGuard jobs | Implemented; manual live-provider QA pending | Validated, idempotent FortyGuard heatmap submission with persisted jobs/runs and audit trail |
 | 5 - API-triggered polling | Implemented; manual live-provider QA pending | One-shot status polling, durable job state, controlled provider response storage, and job-state API |
-| 6-13 | Not started | Data aggregation, model, risk, recommendations, scheduler, replay mode, and QA pack |
+| 6 - Heatmap normalization | Implemented; manual live-provider QA pending | Automatic tile parsing, centroid-based zone aggregation, missing-zone markers, and temperature timeline API |
+| 7-13 | Not started | Features, model, risk, recommendations, scheduler, replay mode, and QA pack |
 
 ## Phase 0 - Foundation details
 
@@ -283,8 +284,67 @@ not required for this phase. Do not paste the key into chat or commit it.
 
 ### Known boundary for the next phase
 
-- Phase 5 stores a scrubbed completed provider response but does not parse the heatmap tiles. Phase 6 will
-  validate the completed `map_data` GeoJSON and aggregate it into zone temperature observations.
+- Resolved in Phase 6: completed heatmap `map_data` is now parsed and aggregated into zone observations.
+
+## Phase 6 - Heatmap normalization and zone aggregation details
+
+### How it was implemented
+
+- Added `zone_temperature_observations` and migration `20260827_0005`. Each observation records the zone,
+  heatmap requested time, mean/min/max/standard-deviation Celsius values, tile count, source heatmap run,
+  forecast flag, data status, and source-retrieval time.
+- Added a `zone_id + source_run_id` uniqueness rule, so a completed heatmap run cannot generate duplicate
+  temperature records when a status check is repeated.
+- Added strict extraction of FortyGuard `data.result.map_data`: it must be a GeoJSON FeatureCollection of
+  valid Polygon/MultiPolygon Features with a supported Celsius property. The parser accepts common provider
+  value names (`temperature_c`, `temperature`, `temp_c`, `temp`, `tcm`, or `value`) and rejects missing,
+  non-numeric, or non-finite temperatures.
+- Added automatic aggregation during the first successful completed/succeeded job poll. It uses the live
+  in-memory provider response before Phase 5's controlled raw-response summary can truncate a large map.
+- Chose and documented **tile-centroid assignment**: one tile goes to the active zone that covers its
+  centroid. A code-order tie-break handles a centroid on a shared zone boundary. This prevents the same tile
+  from contributing to two zones.
+- For every active zone whose area overlaps the heatmap AOI, the service persists either calculated
+  population statistics or a `missing` marker with null statistics and tile count zero. If the AOI overlaps
+  no zones, it creates no observations and writes a `heatmap.normalized_no_overlap` audit event.
+- Added `GET /api/v1/temperatures?start=...&end=...`, with optional `zone_id` and `include_missing` filters.
+  The response exposes only normalized observations, never the raw provider map.
+- Added audit records for successful normalization, no-overlap handling, and safe normalization failures.
+
+### Verification performed
+
+- Static lint and Python compilation: passed.
+- FastAPI OpenAPI validation: the temperature timeline route is registered.
+- Representative tile GeoJSON parsing: two Celsius tiles produced correct mean `32.000`, min `30.000`,
+  max `34.000`, and population standard deviation `2.000`.
+- Zone-temperature model metadata validation: required traceability fields and the one-zone-per-run
+  uniqueness rule are registered.
+- Alembic migration graph validation: `20260827_0005` correctly follows the polling migration.
+
+### Manual QA still required
+
+This requires PostGIS, seeded active zones, and a completed FortyGuard heatmap job. Do not paste the API key
+into chat or commit it.
+
+1. Run `docker compose exec api alembic upgrade head`, then seed the city and zones if needed with
+   `python -m app.scripts.seed_city` and `python -m app.scripts.seed_zones` inside the API container.
+2. Submit a valid `tcm` heatmap whose AOI overlaps one or more active demo zones, then poll it to
+   `status: "completed"` using the Phase 5 route.
+3. Query `GET /api/v1/temperatures` for the requested UTC time window. Confirm every active zone overlapping
+   that AOI has one record with `source_run_id`, `source_retrieved_at`, and the correct `is_forecast` value.
+4. For available records, compare the returned mean/min/max values with a visually plausible portion of the
+   provider heatmap and verify `tile_count > 0`.
+5. For a zone overlapping the AOI but receiving no tile centroid, confirm `data_status: "missing"`, zero tile
+   count, and null statistics. It must not contain a numeric zero temperature.
+6. Submit a small heatmap AOI that overlaps no active zone. After completion, confirm the temperature query
+   returns zero records for that run/time and the audit history contains `heatmap.normalized_no_overlap`.
+7. Repeat a status poll for an already completed job. Confirm no duplicate observations are created for the
+   same `source_run_id`.
+
+### Known boundary for the next phase
+
+- Phase 6 produces source-traceable zone temperatures only. Phase 7 will align them with EIA demand in UTC
+  and the Houston local timezone, calculate Cooling Degree Hours, and report missing-data quality.
 
 ## Secrets reminder
 

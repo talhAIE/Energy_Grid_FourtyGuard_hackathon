@@ -19,6 +19,10 @@ from app.services.fortyguard_client import (
     FortyGuardPollError,
     FortyGuardPollResult,
 )
+from app.services.heatmap_normalization_service import (
+    HeatmapNormalizationError,
+    normalize_completed_heatmap,
+)
 
 TERMINAL_JOB_STATUSES = {"completed", "failed", "succeeded", "timed_out", "submission_failed"}
 SUCCESS_PROVIDER_STATUSES = {"completed", "succeeded"}
@@ -125,12 +129,42 @@ def _persist_poll_result(
     if normalized_status in SUCCESS_PROVIDER_STATUSES:
         job.status = "completed"
         job.completed_at = now
+        try:
+            normalization = normalize_completed_heatmap(
+                session,
+                job=job,
+                provider_response=result.response_payload,
+                execution_time=now,
+            )
+        except HeatmapNormalizationError:
+            job.error_code = "normalization_failed"
+            record_audit_event(
+                session,
+                event_type="heatmap.normalization_failed",
+                entity_type="integration_job",
+                entity_id=job.id,
+                payload={"error_code": "normalization_failed"},
+            )
+        else:
+            job.error_code = None
         record_audit_event(
             session,
             event_type="heatmap.poll_completed",
             entity_type="integration_job",
             entity_id=job.id,
-            payload={"provider_status": normalized_status, "poll_attempts": job.poll_attempts},
+            payload={
+                "provider_status": normalized_status,
+                "poll_attempts": job.poll_attempts,
+                "normalization": {
+                    "source_run_id": str(normalization.source_run_id),
+                    "available_zone_count": normalization.available_zone_count,
+                    "missing_zone_count": normalization.missing_zone_count,
+                    "no_overlap": normalization.no_overlap,
+                    "reused": normalization.reused,
+                }
+                if job.error_code is None
+                else {"status": "failed"},
+            },
         )
     elif normalized_status in FAILED_PROVIDER_STATUSES:
         _mark_failed(

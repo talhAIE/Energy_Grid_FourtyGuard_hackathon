@@ -230,3 +230,40 @@ or `timed_out`. Each request makes only one FortyGuard status call and returns i
 
 The backend saves only a scrubbed, size-limited provider response/summary for future normalization. It does
 not log or expose API keys, signed URLs, or oversized heatmap payloads.
+
+## Phase 6 heatmap normalization and zone temperatures
+
+When `POST /api/v1/jobs/{job_id}/poll` first receives a completed/succeeded provider status, the backend
+automatically parses the returned `data.result.map_data` GeoJSON and writes zone-temperature observations.
+No extra provider request is made.
+
+- **Assignment rule:** each valid heat tile is assigned to the active zone containing its centroid. If a
+  centroid lies exactly on shared boundaries, the first zone code in alphabetical order wins. This avoids
+  double-counting a tile.
+- **Missing data:** every active zone that overlaps the requested heatmap AOI receives a record. Zones with
+  no assigned tiles are stored as `data_status: "missing"` with null statistics—not zero temperature.
+- **Traceability:** each record keeps its `source_run_id`, source-retrieval time, tile count, requested
+  observation time, and `is_forecast` flag.
+
+1. Run the latest migration and seed active zones before submitting a heatmap:
+
+   ```powershell
+   docker compose exec api alembic upgrade head
+   docker compose exec api python -m app.scripts.seed_city
+   docker compose exec api python -m app.scripts.seed_zones
+   ```
+
+2. Submit a valid `tcm` heatmap with an AOI overlapping one or more demo zones. Poll the job every five
+   seconds until its status is `completed`.
+
+3. Query the stored temperature timeline with `GET /api/v1/temperatures`:
+
+   ```text
+   /api/v1/temperatures?start=2025-08-01T00:00:00Z&end=2025-08-02T00:00:00Z
+   ```
+
+   Add `zone_id=<uuid>` to select one zone, or `include_missing=false` to return only available values.
+
+4. Confirm an available record contains `mean_c`, `min_c`, `max_c`, `stddev_c`, a positive `tile_count`,
+   and `source_run_id`. A missing record must have `data_status: "missing"`, `tile_count: 0`, and null
+   statistics.
