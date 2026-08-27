@@ -62,3 +62,16 @@ docker compose exec api python -m app.scripts.seed_city
 ```
 
 Then call `GET /api/v1/health`. Its `dependencies.database` field should be `healthy`.
+
+## Phase 2 zone setup
+
+After the database migration and city seed succeed, seed the eight version-controlled Houston demo zones:
+
+```powershell
+docker compose exec api python -m app.scripts.seed_zones
+```
+
+Check the result with `GET /api/v1/zones`. The response must contain eight active zones whose
+allocation weights total `1.0`. `POST /api/v1/zones` is available in development only and rejects
+invalid GeoJSON, zones outside the Houston demo boundary, duplicate codes, overlaps, and active
+allocation weights above `1.0`.

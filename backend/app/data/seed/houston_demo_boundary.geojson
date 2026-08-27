@@ -1,0 +1,17 @@
+{
+  "type": "Feature",
+  "properties": {
+    "name": "Houston demo analysis boundary",
+    "note": "Approximate hackathon analysis envelope; not an official municipal boundary."
+  },
+  "geometry": {
+    "type": "Polygon",
+    "coordinates": [[
+      [-95.85, 29.55],
+      [-95.05, 29.55],
+      [-95.05, 30.10],
+      [-95.85, 30.10],
+      [-95.85, 29.55]
+    ]]
+  }
+}

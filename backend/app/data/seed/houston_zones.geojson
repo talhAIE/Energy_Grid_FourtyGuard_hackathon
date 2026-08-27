@@ -1,0 +1,45 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {"name": "Katy / West Houston", "code": "KATY_WEST", "allocation_weight": 0.15},
+      "geometry": {"type": "Polygon", "coordinates": [[[-95.80, 29.70], [-95.66, 29.70], [-95.66, 29.81], [-95.80, 29.81], [-95.80, 29.70]]]}
+    },
+    {
+      "type": "Feature",
+      "properties": {"name": "Energy Corridor", "code": "ENERGY_CORRIDOR", "allocation_weight": 0.12},
+      "geometry": {"type": "Polygon", "coordinates": [[[-95.65, 29.69], [-95.52, 29.69], [-95.52, 29.79], [-95.65, 29.79], [-95.65, 29.69]]]}
+    },
+    {
+      "type": "Feature",
+      "properties": {"name": "Galleria / Uptown", "code": "GALLERIA_UPTOWN", "allocation_weight": 0.12},
+      "geometry": {"type": "Polygon", "coordinates": [[[-95.50, 29.71], [-95.43, 29.71], [-95.43, 29.77], [-95.50, 29.77], [-95.50, 29.71]]]}
+    },
+    {
+      "type": "Feature",
+      "properties": {"name": "Downtown", "code": "DOWNTOWN", "allocation_weight": 0.12},
+      "geometry": {"type": "Polygon", "coordinates": [[[-95.42, 29.73], [-95.34, 29.73], [-95.34, 29.79], [-95.42, 29.79], [-95.42, 29.73]]]}
+    },
+    {
+      "type": "Feature",
+      "properties": {"name": "Texas Medical Center", "code": "MEDICAL_CENTER", "allocation_weight": 0.10},
+      "geometry": {"type": "Polygon", "coordinates": [[[-95.42, 29.67], [-95.34, 29.67], [-95.34, 29.72], [-95.42, 29.72], [-95.42, 29.67]]]}
+    },
+    {
+      "type": "Feature",
+      "properties": {"name": "East Houston", "code": "EAST_HOUSTON", "allocation_weight": 0.12},
+      "geometry": {"type": "Polygon", "coordinates": [[[-95.33, 29.69], [-95.16, 29.69], [-95.16, 29.79], [-95.33, 29.79], [-95.33, 29.69]]]}
+    },
+    {
+      "type": "Feature",
+      "properties": {"name": "Port of Houston", "code": "PORT_HOUSTON", "allocation_weight": 0.15},
+      "geometry": {"type": "Polygon", "coordinates": [[[-95.25, 29.58], [-95.08, 29.58], [-95.08, 29.68], [-95.25, 29.68], [-95.25, 29.58]]]}
+    },
+    {
+      "type": "Feature",
+      "properties": {"name": "North Houston", "code": "NORTH_HOUSTON", "allocation_weight": 0.12},
+      "geometry": {"type": "Polygon", "coordinates": [[[-95.47, 29.83], [-95.26, 29.83], [-95.26, 29.98], [-95.47, 29.98], [-95.47, 29.83]]]}
+    }
+  ]
+}
