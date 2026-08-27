@@ -25,7 +25,7 @@ This file tracks completed work and how it was implemented. Update it at the end
 | 0 - Foundation | Complete | Created FastAPI project, virtual environment, safe config template, `/api/v1/health`, optional Docker files, linting, and local setup guide |
 | 1 - Database foundation | Implemented; manual database QA pending | Added PostGIS Docker configuration, SQLAlchemy models, Alembic setup, initial core-schema migration, database health check, and idempotent city seed script |
 | 2 - Zone management | Implemented; manual database QA pending | Added Houston zone seed data, GeoJSON validation, zone API, allocation/overlap/boundary checks, and audit events |
-| 3 - EIA ingestion | Not started | Historical demand import and storage |
+| 3 - EIA ingestion | Implemented; manual live-data QA pending | Configurable EIA/ERCOT hourly demand import, normalized storage, duplicate protection, API routes, and audit trail |
 | 4 - FortyGuard jobs | Not started | Heatmap submission and idempotency |
 | 5 - Async polling | Not started | Celery/Redis workers and status polling |
 | 6-13 | Not started | Data aggregation, model, risk, recommendations, scheduler, replay mode, and QA pack |
@@ -103,6 +103,61 @@ After Phase 1 database QA is available:
 5. Create a valid non-overlapping development zone; confirm a `201` response and `zone.created` audit event.
 6. Try an unclosed polygon, an outside-boundary polygon, a duplicate code, and an overlapping polygon; confirm each is rejected.
 7. Try adding a zone that makes active allocation weights exceed `1.0`; confirm it is rejected.
+
+## Phase 3 - EIA demand-data ingestion details
+
+### How it was implemented
+
+- Added the `demand_observations` database model and Alembic migration `20260827_0002`.
+  Each observation stores the city, UTC timestamp, data source, source-area code, demand in MW,
+  actual/forecast indicator, optional quality flag, and standard audit timestamps.
+- Added a database uniqueness rule for `city + source + source area + UTC timestamp`. Re-importing
+  the same EIA period skips existing observations instead of creating duplicates.
+- Added safe, configuration-driven EIA settings to `backend/.env.example`:
+  `EIA_DEMAND_ROUTE`, `EIA_DEMAND_AREA_CODE`, `EIA_DEMAND_TYPE`, timezone, request timeout, and a
+  maximum import range. The default is EIA Form 930 hourly ERCOT (`ERCO`) demand; no API key is in code.
+- Added `app/services/eia_client.py`, which uses an explicit HTTP timeout, paginates EIA responses,
+  validates/normalizes timestamps to UTC, validates MW values, and turns provider/configuration
+  failures into safe messages without exposing the API key.
+- Added `app/services/demand_data_service.py`, which fetches a bounded historical range, persists only
+  unseen observations, records a `demand.eia_imported` audit event, and lists stored observations.
+- Added two backend routes:
+  - `POST /api/v1/data/eia/import` imports a maximum 31-day historical range for the configured EIA area.
+  - `GET /api/v1/data/demand?start=...&end=...` returns only the stored, chronological demand records.
+- Added the command-line helper:
+  `python -m app.scripts.import_eia_data --start <ISO-8601> --end <ISO-8601>`.
+- Added `httpx` as the project HTTP dependency and documented the Phase 3 setup/use flow in
+  `backend/README.md`.
+
+### Verification performed
+
+- Static lint and Python compilation: passed.
+- FastAPI OpenAPI validation: both new demand routes are registered.
+- Demand model metadata validation: the table and source-area-timestamp uniqueness rule are registered.
+- EIA normalizer checked with a representative EIA Form 930-style demand record: it produces a UTC
+  timestamp, MW decimal value, actual flag, and deduplicated result.
+- Alembic migration graph validation: `20260827_0002` correctly follows the Phase 1 core schema migration.
+
+### Manual QA still required
+
+This needs Docker Desktop or another running Postgres/PostGIS database, plus your local `EIA_API_KEY` in
+`backend/.env`. Do not paste the key into chat or commit it.
+
+1. From `backend/`, ensure the EIA variables from `.env.example` exist in `backend/.env`; keep the default
+   `EIA_DEMAND_AREA_CODE=ERCO` for this Houston/ERCOT demo.
+2. Run `docker compose up --build -d`, then `docker compose exec api alembic upgrade head`.
+3. Run `docker compose exec api python -m app.scripts.seed_city`.
+4. Import one hot historical week:
+   `docker compose exec api python -m app.scripts.import_eia_data --start 2025-08-01T00:00:00Z --end 2025-08-08T00:00:00Z`.
+5. In `/docs`, call `GET /api/v1/data/demand` for the same start/end. Confirm records are chronological,
+   use `period_utc`, show `source: "EIA"`, `source_area_code: "ERCO"`, `is_actual: true`, and a positive
+   `demand_mw` value.
+6. Compare several timestamps and MW values with the EIA data browser for the ERCOT hourly demand series.
+7. Run the identical import again. Expected: `created=0` and the stored record count does not grow.
+8. Submit an end before start, or a range longer than 31 days, to `POST /api/v1/data/eia/import`. Expected:
+   a clear `422` response with `invalid_date_range`.
+9. Temporarily leave `EIA_API_KEY` blank only in your local `backend/.env`, restart the API, and import again.
+   Expected: a clear `503` response with `eia_not_configured`; restore the key afterward.
 
 ## Secrets reminder
 

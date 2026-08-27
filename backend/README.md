@@ -75,3 +75,48 @@ Check the result with `GET /api/v1/zones`. The response must contain eight activ
 allocation weights total `1.0`. `POST /api/v1/zones` is available in development only and rejects
 invalid GeoJSON, zones outside the Houston demo boundary, duplicate codes, overlaps, and active
 allocation weights above `1.0`.
+
+## Phase 3 EIA historical-demand import
+
+Phase 3 imports **real hourly balancing-authority demand**, not feeder-level Houston demand. The
+default local configuration uses EIA Form 930's ERCOT respondent (`ERCO`) as the city-level demand
+proxy. It is explicitly a grid-area series and will be allocated to project zones only in a later phase.
+
+1. Make sure `backend/.env` has your EIA key and the safe default EIA settings from `.env.example`:
+
+   ```dotenv
+   EIA_API_KEY=your_eia_key
+   EIA_DEMAND_ROUTE=electricity/rto/region-data/data
+   EIA_DEMAND_AREA_CODE=ERCO
+   EIA_DEMAND_TYPE=D
+   ```
+
+2. Start PostGIS, migrate, and seed the configured city once:
+
+   ```powershell
+   docker compose up --build -d
+   docker compose exec api alembic upgrade head
+   docker compose exec api python -m app.scripts.seed_city
+   ```
+
+3. Import a hot historical week. The import endpoint and script accept a maximum 31-day range:
+
+   ```powershell
+   docker compose exec api python -m app.scripts.import_eia_data --start 2025-08-01T00:00:00Z --end 2025-08-08T00:00:00Z
+   ```
+
+   Or use `POST /api/v1/data/eia/import` in `/docs` with:
+
+   ```json
+   {
+     "start": "2025-08-01T00:00:00Z",
+     "end": "2025-08-08T00:00:00Z"
+   }
+   ```
+
+4. Query stored records with `GET /api/v1/data/demand`, passing the same `start` and `end` as ISO-8601
+   query parameters. The response contains `demand_mw`, UTC timestamps, source `EIA`, source area `ERCO`,
+   and an `is_actual` flag.
+
+5. Run the same import again. It should report `created=0` and skipped duplicates rather than store the
+   same source-area/timestamp record twice.
