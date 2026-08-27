@@ -8,7 +8,8 @@ This file tracks completed work and how it was implemented. Update it at the end
 - **Demo location:** Houston, Texas, using ERCOT data for real historical grid-demand calibration.
 - **Core data:** FortyGuard heatmaps for temperature and EIA/ERCOT sources for historical demand.
 - **Safety boundary:** recommendations only; never direct control of electric-grid equipment.
-- **Backend stack:** Python 3.12, FastAPI, PostgreSQL/PostGIS, SQLAlchemy, Alembic, Redis/Celery later.
+- **Backend stack:** Python 3.12, FastAPI, PostgreSQL/PostGIS, SQLAlchemy, Alembic, and client-triggered
+  provider polling (no Redis/Celery worker).
 
 ## Documentation completed
 
@@ -29,7 +30,8 @@ This file tracks completed work and how it was implemented. Update it at the end
 | 4 - FortyGuard jobs | Implemented; manual live-provider QA pending | Validated, idempotent FortyGuard heatmap submission with persisted jobs/runs and audit trail |
 | 5 - API-triggered polling | Implemented; manual live-provider QA pending | One-shot status polling, durable job state, controlled provider response storage, and job-state API |
 | 6 - Heatmap normalization | Implemented; manual live-provider QA pending | Automatic tile parsing, centroid-based zone aggregation, missing-zone markers, and temperature timeline API |
-| 7-13 | Not started | Features, model, risk, recommendations, scheduler, replay mode, and QA pack |
+| 7 - Feature dataset | Implemented; manual dataset QA pending | Versioned CSV/quality report, UTC/local time alignment, Cooling Degree Hours, calendar features, and explicit missing-temperature labels |
+| 8-13 | Not started | Model, risk, recommendations, scheduler, replay mode, and QA pack |
 
 ## Phase 0 - Foundation details
 
@@ -343,8 +345,75 @@ into chat or commit it.
 
 ### Known boundary for the next phase
 
-- Phase 6 produces source-traceable zone temperatures only. Phase 7 will align them with EIA demand in UTC
-  and the Houston local timezone, calculate Cooling Degree Hours, and report missing-data quality.
+- Resolved in Phase 7: EIA demand and zone temperatures are now aligned into a documented, versioned feature
+  dataset with Cooling Degree Hours and visible quality states.
+
+## Phase 7 - Data preparation and Cooling Degree Hours details
+
+### How it was implemented
+
+- Added `app/services/feature_dataset_service.py`, which builds one model-ready row for each persisted EIA
+  demand observation in a requested UTC range. It matches only zone-temperature observations at the **same
+  UTC timestamp**; it never forward-fills or interpolates values.
+- Added allocation-weighted city temperature. With all active zones available, the row is `complete`. With
+  only some zones available, it keeps the available-zone weighted mean but marks the row
+  `partial_temperature` and records the represented allocation weight. With no usable temperatures, both
+  temperature and CDH are null and the row is `missing_temperature`.
+- Added configurable Cooling Degree Hours using
+  `max(0, city_temperature_c - COOLING_BASE_TEMPERATURE_C)`. The default city baseline is 18 Celsius.
+- Added local calendar fields from the same UTC instant in `DEMO_TIMEZONE`: local hour, day of week, weekend,
+  month, and an observed U.S. federal-holiday flag. UTC is retained beside the local time so daylight-saving
+  transitions remain traceable.
+- Added `python -m app.scripts.build_feature_dataset --start <ISO-8601> --end <ISO-8601>` and safe
+  configuration for its maximum range and generated-artifact directory. The script writes a versioned CSV
+  and matching JSON quality report; output under `app/data/generated/` is ignored by Git.
+- Dataset versions are a SHA-256 fingerprint of the schema version, city, requested time range, cooling
+  baseline, and source-derived feature rows. Rebuilding unchanged source data produces the same artifact
+  name.
+- Added `docs/feature-dataset-contract.md` and Phase 7 operating/manual-QA instructions to the backend
+  README. The contract defines the complete row schema and quality policy for Phase 8.
+- Added an append-only `feature_dataset.built` audit event after the output artifacts are written. No
+  database migration or public API route was needed for this phase.
+
+### Verification performed
+
+- Static lint and Python compilation: passed.
+- Feature-building helper checks cover complete, partial, and missing temperature coverage; CDH uses the
+  configured baseline and preserves nulls for missing temperature data.
+- Local-time conversion and observed U.S. federal-holiday feature checks were performed, including a Houston
+  daylight-saving-time timestamp.
+- Command-line help and generated-artifact contract were checked without contacting EIA or FortyGuard.
+
+### Manual QA still required
+
+This requires the previous phase database/manual QA: an active PostGIS database, seeded city/zones, stored
+EIA demand, and normalized zone temperatures. Do not paste either API key into chat or commit `backend/.env`.
+
+1. Follow Phase 1, 3, and 6 manual setup to seed active zones, import a historical ERCOT demand range, and
+   complete/poll a FortyGuard heatmap for matching UTC times.
+2. From `backend/`, run
+   `python -m app.scripts.build_feature_dataset --start 2025-08-01T00:00:00Z --end 2025-08-08T00:00:00Z`.
+   The requested interval must contain at least one stored demand observation and cannot exceed the
+   configured `FEATURE_DATASET_MAX_RANGE_DAYS`.
+3. Open the emitted CSV and JSON report. Confirm every row includes UTC/local timestamps, target demand MW,
+   feature quality status, coverage, and calendar values. Confirm the JSON report's row and quality counts
+   agree with the CSV.
+4. With `COOLING_BASE_TEMPERATURE_C=18`, verify five available-temperature rows or controlled records:
+   16, 18, 20, 25, and 30 Celsius must yield CDH 0, 0, 2, 7, and 12 respectively.
+5. Inspect records around a Houston daylight-saving-time change. Confirm `period_utc` stays unique and
+   `period_local` represents the correct local offset/hour; do not merge the repeated local fall-back hour.
+6. Build a range with only partial zone coverage. Confirm it is labeled `partial_temperature`, displays its
+   coverage weight, and uses only the available zones. Build or inspect a range with no usable zone
+   temperatures; confirm temperature and CDH are null and the status is `missing_temperature`.
+7. Run the identical command again without changing stored inputs or configuration. Confirm the dataset
+   version/artifact names are identical. Change only `COOLING_BASE_TEMPERATURE_C`, rebuild, and confirm the
+   version and CDH values change.
+
+### Known boundary for the next phase
+
+- Phase 7 creates documented, quality-labeled training data only. Phase 8 will use an explicit chronological
+  split to train and evaluate a city-level baseline forecast model; it must decide which quality states are
+  eligible and must not treat null values as zero.
 
 ## Secrets reminder
 

@@ -1,3 +1,4 @@
+from decimal import Decimal
 from functools import lru_cache
 from typing import Literal
 
@@ -18,6 +19,20 @@ class Settings(BaseSettings):
     database_url: str | None = Field(default=None, validation_alias="DATABASE_URL")
     demo_city_name: str = Field(default="Houston, Texas", validation_alias="DEMO_CITY_NAME")
     demo_timezone: str = Field(default="America/Chicago", validation_alias="DEMO_TIMEZONE")
+    cooling_base_temperature_c: Decimal = Field(
+        default=Decimal("18"),
+        validation_alias="COOLING_BASE_TEMPERATURE_C",
+    )
+    feature_dataset_max_range_days: int = Field(
+        default=366,
+        ge=1,
+        le=1_825,
+        validation_alias="FEATURE_DATASET_MAX_RANGE_DAYS",
+    )
+    feature_dataset_dir: str = Field(
+        default="app/data/generated/features",
+        validation_alias="FEATURE_DATASET_DIR",
+    )
     eia_base_url: str = Field(default="https://api.eia.gov/v2", validation_alias="EIA_BASE_URL")
     eia_api_key: str | None = Field(default=None, validation_alias="EIA_API_KEY")
     eia_demand_route: str = Field(

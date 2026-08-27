@@ -267,3 +267,46 @@ No extra provider request is made.
 4. Confirm an available record contains `mean_c`, `min_c`, `max_c`, `stddev_c`, a positive `tile_count`,
    and `source_run_id`. A missing record must have `data_status: "missing"`, `tile_count: 0`, and null
    statistics.
+
+## Phase 7 feature dataset and Cooling Degree Hours
+
+Phase 7 builds a versioned, city-level model dataset from persisted EIA demand and the zone temperatures
+created in Phase 6. It is intentionally a script rather than an API route: building a dataset is an
+explicit development/training step, not a request that a dashboard should run.
+
+- Demand and temperatures are matched at the same UTC timestamp. `period_local` converts that instant to
+  `DEMO_TIMEZONE` (`America/Chicago` by default) for calendar features and daylight-saving-time safety.
+- `city_temperature_c` is an allocation-weighted mean of the available active zones. The result carries
+  `temperature_coverage_weight`, so partial coverage is visible.
+- Cooling Degree Hours are `max(0, city_temperature_c - COOLING_BASE_TEMPERATURE_C)`. The default baseline
+  is `18` Celsius and can be changed only through local configuration.
+- Missing temperatures are never interpolated, filled forward, or converted to zero. Such rows have null
+  temperature/CDH and a `missing_temperature` quality status.
+
+1. Complete the Phase 1, 3, and 6 database/manual QA prerequisites so there are seeded active zones,
+   persisted ERCOT demand, and zone-temperature observations for the requested period.
+
+2. In `backend/.env`, keep or adjust the safe defaults:
+
+   ```dotenv
+   COOLING_BASE_TEMPERATURE_C=18
+   FEATURE_DATASET_MAX_RANGE_DAYS=366
+   FEATURE_DATASET_DIR=app/data/generated/features
+   ```
+
+3. Build a defined historical range (up to the configured maximum):
+
+   ```powershell
+   python -m app.scripts.build_feature_dataset --start 2025-08-01T00:00:00Z --end 2025-08-08T00:00:00Z
+   ```
+
+   When using the optional local Docker API service, run the same command inside it with
+   `docker compose exec api`. The command writes a versioned `.csv` and matching `.quality.json` report to
+   `FEATURE_DATASET_DIR`; generated files are ignored by Git.
+
+4. Read the [feature dataset contract](docs/feature-dataset-contract.md) before Phase 8 model work. It
+   defines all fields and the allowed quality statuses.
+
+5. Manual QA: check CDH at 16, 18, 20, 25, and 30 Celsius with the 18 Celsius baseline; expected values
+   are 0, 0, 2, 7, and 12. Also inspect rows around a Houston daylight-saving transition and confirm the
+   quality report clearly counts partial/missing temperature rows.
