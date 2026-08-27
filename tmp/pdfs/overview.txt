@@ -1,0 +1,112 @@
+ONE-PAGE OVERVIEW · PART 1
+The Idea, End to End FortyGuard Hackathon '26
+Energy Grid Heat-Demand Forecaster
+In one line: Software that watches the weather and warns the power grid before it gets overwhelmed by everyone turning on their AC at once.
+▼ ▼ ▼ ▼
+Objective
+Give power utilities enough advance warning
+about heat-driven electricity demand that they
+can act before things go wrong — not after.
+Turn FortyGuard's hyperlocal (city-block-level)
+temperature data into: "Zone 4 will spike in the
+next few hours — here's how much, and how long
+you have to prepare."
+Problem It Solves
+Heat drives AC use — demand isn't spread
+evenly across a city.
+Grids have limits — sudden demand forces
+emergency power or blackouts.
+Today's forecasting is too broad — city-wide,
+not district-by-district.
+Reaction beats prevention — by the time
+demand rises, the calm window to act is gone.
+How It Works
+1 Heat data
+FortyGuard current + 12hr forecast per
+zone
+2 Cooling Degree Days
+proven utility formula, not a guess
+3 Calibrate
+tune with public demand datasets
+4 Risk score
+0–100 per-zone demand-spike score
+5 Agent loop
+observe→evaluate→plan→validate→act→record,
+human approves
+Why We Stand Out
+Named vertical — Energy Trading is one of
+FortyGuard's 3 named 2026 growth focuses.
+Real science — built on a documented,
+industry-proven formula.
+Hard to fake — most teams won't attempt a
+real model.
+Boardroom stakes — blackout prevention gets
+judge attention.
+Team fit — we have the AI depth to build the
+real version.
+Why it's not just a chart: A dashboard displays numbers. Our system continuously watches, reasons, and recommends action to a human — that's what makes it an AI agent, matching the hackathon's primary track. 
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+• \n\nONE-PAGE OVERVIEW · PART 2
+The Plan, and Why It Wins Build Window: Aug 18–30, 2026
+The 13-Day Sprint
+From onboarding to submission — every stage mapped to a concrete deliverable.
+Team Split
+AI / Modeling Lead
+Cooling-degree-days model, calibration, decision logic
+Data & API Integration
+FortyGuard onboarding, zone pipeline, dataset prep
+Frontend & Dashboard
+Map view, risk cards, timeline, approval UI
+Agent Logic & Guardrails
+Loop, thresholds, audit logging
+Why This Is the Best Idea
+Named FortyGuard vertical — one of only 3 named 2026
+growth areas.
+Real, defensible science — not an invented formula.
+Genuinely hard to fake — differentiates us from easy
+dashboard entries.
+High-stakes problem — blackout prevention, not a nice-to-
+have.
+Matches our team's strength — real AI depth, not just UI
+wiring.
+Fit Score
+8.8/ 10 ESTIMATED FIT
+Rated highest among all seven directions explored for mission
+alignment, feasibility, and how well it matches what our team can
+actually execute.
+"We're not just showing a chart of temperature — we're giving the grid a head start."
+Energy Grid Heat-Demand Forecaster · FortyGuard Hackathon'26 · Team Lead Approved
+1
+Aug 18–19
+Onboard + data
+2
+Aug 20–21
+Baseline model
+3
+Aug 22–23
+Make hyperlocal
+4
+Aug 24
+Agent loop
+5
+Aug 25–26
+Dashboard
+6
+Aug 27
+Guardrails
+7
+Aug 28
+Demo script
+8
+Aug 29
+Rehearse
+9
+Aug 30
+Submit + present

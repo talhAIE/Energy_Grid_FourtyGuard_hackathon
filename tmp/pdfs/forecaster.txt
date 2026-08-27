@@ -1,0 +1,149 @@
+PROJECT BRIEF · FORTYGUARD HACKATHON '26
+Energy Grid
+Heat-Demand Forecaster
+Predicting tomorrow's power crunch, before it happens.
+A plain-language guide to what we're building, why it matters to
+FortyGuard, how it actually works under the hood, and how our team turns
+it into a working demo between August 18 and 30. 
+Team Lead Approved · Moving Forward
+Prepared for the team · FortyGuard Hackathon'26 · Build window: Aug 18–30, 2026\n\nPART 1
+What Is It?
+In one sentence: software that watches the weather and warns the power grid before it
+gets overwhelmed by everyone turning on their AC at once.
+Think about the hottest day of the year in any city. As the temperature climbs, more and more people
+switch on air conditioners at roughly the same time. That sudden jump in electricity use is called a 
+demand spike. If a spike is big enough and the power company isn't ready for it, the result is a blackout
+— the grid simply can't supply that much power fast enough.
+Right now, power companies mostly react to this after it starts happening, or they rely on city-wide
+weather forecasts that are too broad to say exactly which neighborhoods will spike first. Our project
+closes that gap.
+The Idea in Plain Words
+We take FortyGuard's hyperlocal temperature data (accurate down to individual city blocks) and
+turn it into an early-warning system: "Zone 4 is about to get hot enough that electricity demand
+there will spike in the next few hours — here's how much, and here's how long you have to
+prepare."
+It's not a weather app. It's a decision-support agent — something that watches conditions continuously,
+figures out when a real risk is forming, and recommends an action to a human, rather than just displaying
+numbers on a screen.
+Energy Grid Heat-Demand Forecaster —Project Brief Page 2 of 7\n\nPART 2
+What Problem Does It Solve?
+The aim: give power utilities enough advance warning about heat-driven electricity
+demand that they can act before things go wrong — not after.
+The problem, step by step
+Heat drives electricity use. Air conditioning is one of the single biggest drivers of electricity demand
+in hot climates — and that demand isn't spread evenly across a city.
+Grids have limits. Every power grid can only supply so much electricity at once. When demand
+suddenly outpaces supply, utilities either scramble for emergency power or are forced into rolling
+blackouts.
+Current forecasting is too broad. Most demand planning today uses city-wide or region-wide
+weather data. It can't tell a utility "this specific district will spike two hours before that one."
+Reaction is slower than prevention. By the time a utility sees demand actually rising on their
+systems, they've already lost the best window to act calmly — rerouting power, alerting large
+consumers, or bringing backup capacity online.
+Why this matters to FortyGuard specifically: Energy Trading is one of only three industries FortyGuard
+has publicly named as a 2026 growth focus, alongside Agriculture and Rail. This isn't us guessing at
+relevance — it's a problem they've already said they want solved. 
+Who this actually helps
+Who What they get
+Power utilities / grid
+operators
+Hours of advance warning to pre-position backup capacity or shift load, instead of
+reacting mid-crisis.
+City governments Fewer blackouts during heatwaves — a direct, visible public-safety win.
+Residents & businessesMore reliable power exactly when they need it most: during dangerous heat.
+FortyGuard A working proof-of-concept in a named growth vertical, built by an outside team
+— strong signal for their roadmap.
+1. 
+2. 
+3. 
+4. 
+Energy Grid Heat-Demand Forecaster —Project Brief Page 3 of 7\n\nPART 3
+How It Actually Works
+Five layers, from raw temperature data to a recommendation a human approves.
+1 Start with FortyGuard's heat data
+We pull current temperature and a 12-hour forecast for each zone we define in a city — this is
+FortyGuard's core product, already hyperlocal (accurate to roughly city-block level).
+2 Apply "Cooling Degree Days" — a real, proven formula
+Utilities already use this concept: every degree the temperature rises above a comfortable baseline
+(commonly around 18–20°C / 65°F), electricity use for cooling goes up in a predictable, well-
+documented way. This isn't something we're inventing — it's an established method in the energy
+industry, which makes our model scientifically defensible rather than a guess.
+3 Calibrate with public demand data
+We layer in publicly available electricity-demand datasets (for example, open grid-operator data) so
+our model isn't just theoretical — it's tuned against how demand has actually behaved during past
+heat events.
+4 Turn it into a per-zone risk score
+For every zone, the system produces a simple 0–100 "Demand Spike Risk" score, updated as new
+forecast data comes in — along with a plain-language reason (e.g. "Zone 4: temperature rising fast,
+historically correlates with a 22% demand increase within 3 hours").
+5 Wrap it in an autonomous agent loop
+The system doesn't just calculate once — it continuously runs a six-step loop: Observe conditions → 
+Evaluate the risk score → Plan a recommended action (e.g. "pre-position backup capacity in Zone 4")
+→ Validate against safety guardrails → Act by sending the recommendation to a human → Record the
+decision and outcome for a full audit trail. A human always approves before anything is treated as final
+— the AI recommends, it never acts alone.
+Why this counts as an "AI Agent" and not just a chart: The hackathon's official brief calls out AI Agents
+as a primary track. A dashboard that only displays numbers is a report. Our system continuously
+watches, reasons, and recommends action — that's the difference between a display and an agent. 
+Energy Grid Heat-Demand Forecaster —Project Brief Page 4 of 7\n\nPART 4
+How We Build It: August 18–30
+A realistic day-by-day plan for the two-week sprint.
+Dates Focus What actually happens
+Aug
+18–19
+Onboard + gather data Get FortyGuard API access live, pull temperature data for our
+chosen zones, find and prepare a public electricity-demand
+dataset to calibrate against.
+Aug
+20–21
+Build the baseline modelImplement the cooling-degree-days formula in code; validate it
+against historical demand data to confirm it actually predicts
+real-world patterns.
+Aug
+22–23
+Make it hyperlocal Turn the baseline into a per-zone, 12-hour-ahead demand-
+spike risk score, using FortyGuard's forecast data for each zone
+individually.
+Aug 24 Wrap the agent loop Build the Observe → Evaluate → Plan → Validate → Act →
+Record cycle, with a human-approval step before any
+recommendation is treated as final.
+Aug
+25–26
+Build the dashboard Map view of zones, risk-score cards, a forecast timeline, and
+the approval interface a "utility operator" would use in the
+demo.
+Aug 27 Guardrails + audit log Add data-freshness checks, limits on how fast
+recommendations can change, and full logging of every
+decision — this is what makes the system trustworthy, not just
+clever.
+Aug 28 Demo scripting Script a tight 90-second walkthrough; prepare a backup
+dataset in case live API access is unstable during judging.
+Aug 29 Polish + rehearse Bug fixes, visual clean-up, full team run-throughs of the demo.
+Aug 30 Submit + present Final submission and live pitch to judges.
+Energy Grid Heat-Demand Forecaster —Project Brief Page 5 of 7\n\nA rough team split
+AI / Modeling Lead
+Owns the cooling-degree-days model, demand-
+data calibration, and the agent's decision logic.
+Data & API Integration
+FortyGuard API onboarding, zone data pipeline,
+public demand dataset prep.
+Frontend & Dashboard
+Map view, zone risk cards, timeline, approval UI.
+Agent Logic & Guardrails
+The observe-evaluate-plan-validate-act-record
+loop, thresholds, and audit logging.
+Roles can overlap where needed — this is a starting point for discussion, not a fixed assignment.
+Energy Grid Heat-Demand Forecaster —Project Brief Page 6 of 7\n\nSUMMARY
+Why This Is Worth Our Two Weeks
+Question Answer
+What is it? An AI agent that predicts hyperlocal electricity-demand spikes caused by
+rising heat, before they happen.
+What does it solve? Blackouts and grid strain during heatwaves, by giving utilities hours of
+advance warning instead of a reactive scramble.
+How does it work? FortyGuard heat data → a proven "cooling degree days" model → a per-zone
+risk score → a continuously running agent that recommends action to a
+human.
+Why us? It's a named FortyGuard growth vertical, it's genuinely hard to fake well, and
+our team has the AI depth to build the real version instead of a shortcut.
+"We're not just showing a chart of temperature — we're giving the grid a head start."
+Energy Grid Heat-Demand Forecaster —Project Brief Page 7 of 7

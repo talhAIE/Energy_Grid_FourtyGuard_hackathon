@@ -1,0 +1,12 @@
+services:
+  api:
+    build: .
+    env_file:
+      - .env
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./app:/app/app
+
+# PostgreSQL/PostGIS and Redis are added in Phase 1 and Phase 5.
+
