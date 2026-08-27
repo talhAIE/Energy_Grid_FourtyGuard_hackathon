@@ -120,3 +120,70 @@ proxy. It is explicitly a grid-area series and will be allocated to project zone
 
 5. Run the same import again. It should report `created=0` and skipped duplicates rather than store the
    same source-area/timestamp record twice.
+
+## Phase 4 FortyGuard heatmap submission
+
+Phase 4 submits a heatmap task and returns after FortyGuard acknowledges its `activity_id`. It does
+**not** wait for the final heatmap or poll task status; that background workflow is Phase 5.
+
+1. In your ignored `backend/.env`, keep the FortyGuard key server-side and configure the request limits:
+
+   ```dotenv
+   FORTYGUARD_API_KEY=your_fortyguard_key
+   FORTYGUARD_DEFAULT_GRANULARITY=80
+   FORTYGUARD_REQUEST_TIMEOUT_SECONDS=30
+   FORTYGUARD_MAX_HEATMAP_AREA_SQ_MI=50
+   FORTYGUARD_MAX_FORECAST_HOURS=12
+   ```
+
+   Set the area limit lower if the plan attached to your real key permits less than 50 square miles.
+
+2. Migrate and seed the city boundary before submitting a map:
+
+   ```powershell
+   docker compose up --build -d
+   docker compose exec api alembic upgrade head
+   docker compose exec api python -m app.scripts.seed_city
+   ```
+
+3. Use `POST /api/v1/heatmaps/submit` in `/docs`. This example AOI is a small rectangle inside the
+   approximate Houston demo boundary; date/time inputs are interpreted as UTC:
+
+   ```json
+   {
+     "polygon_aoi": {
+       "type": "FeatureCollection",
+       "features": [
+         {
+           "type": "Feature",
+           "properties": {},
+           "geometry": {
+             "type": "Polygon",
+             "coordinates": [[
+               [-95.70, 29.70], [-95.69, 29.70],
+               [-95.69, 29.71], [-95.70, 29.71],
+               [-95.70, 29.70]
+             ]]
+           }
+         }
+       ]
+     },
+     "date_time": {
+       "start_date": "2025-08-01",
+       "start_time": "12:00",
+       "filter_type": 1
+     },
+     "granularity": 80,
+     "analytic_type": "tcm"
+   }
+   ```
+
+4. Expected response: HTTP `202`, an internal `job_id`, `status: "submitted"`, and a provider
+   `activity_id`. The response never contains your API key or raw provider headers.
+
+5. Submit the exact same JSON again. Expected: the same `job_id` and `activity_id`, with
+   `reused: true`; no second FortyGuard task should be submitted.
+
+6. Try a non-closed polygon, an AOI outside the demo city, `granularity: 70`, an unsupported analytic
+   type, or an AOI larger than the configured area limit. Expected: a clear `400` response and no
+   FortyGuard request.

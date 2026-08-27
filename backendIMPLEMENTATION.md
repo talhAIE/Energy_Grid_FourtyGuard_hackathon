@@ -39,24 +39,37 @@ It will **not** control a real electricity grid, send customer messages, or conn
 
 ## Architecture decisions
 
-Use a single Python service with background workers. Keep the system simple enough to finish, but structured enough to be credible.
+Use one Python API service and a hosted PostgreSQL database. Keep the hackathon deployment free and
+simple, while retaining durable job state that can later support a dedicated worker if needed.
 
 ```text
 Future web dashboard
        |
        v
-FastAPI REST API ----------------------> PostgreSQL + PostGIS
+FastAPI REST API ----------------------> Supabase PostgreSQL + PostGIS
        |                                        |
        |                                        +--> zones, jobs, temperatures, demand,
        |                                             forecasts, recommendations, audit log
        v
-Redis queue <---- Celery worker/scheduler
-       |                 |              |
-       |                 v              v
-       |          FortyGuard API      EIA API / downloaded EIA CSV
-       |
-       +--> job state and retry coordination
+FortyGuard API <-------------------- POST /jobs/{job_id}/poll
+       ^                                      |
+       |                                      +--> one short provider-status check,
+       +------------------------------------------- persisted in PostgreSQL
+
+External scheduler (optional, later) ----> protected API trigger every 60 minutes
 ```
+
+### Hackathon deployment profile
+
+- **Database:** Supabase PostgreSQL with PostGIS enabled. This replaces a local database for normal
+  development and deployment.
+- **Backend:** one FastAPI web service on a free host such as Render. It may sleep when idle; the first
+  request can be slower after sleep.
+- **No Celery or Redis in the hackathon MVP:** a browser/manual client calls a one-shot polling endpoint
+  for a submitted FortyGuard job. The endpoint checks provider status once, persists it, and returns. It
+  never waits for a task to complete.
+- **Future production option:** add a paid always-on worker plus Redis only if unattended, high-volume
+  polling becomes necessary. This is explicitly out of the free hackathon deployment scope.
 
 ### Technology choices
 
@@ -64,14 +77,14 @@ Redis queue <---- Celery worker/scheduler
 | --- | --- | --- |
 | API | Python 3.12 + FastAPI | Clean typed API, excellent data and async ecosystem |
 | Validation/config | Pydantic v2 + pydantic-settings | Reliable request validation and `.env` configuration |
-| Database | PostgreSQL 16 + PostGIS | Stores time series, GeoJSON zones, and audit records |
+| Database | Supabase PostgreSQL + PostGIS | Hosted storage for time series, GeoJSON zones, and audit records |
 | ORM/migrations | SQLAlchemy 2 + Alembic | Explicit models and repeatable database migrations |
-| Background jobs | Celery + Redis | Handles FortyGuard submit/poll tasks outside HTTP requests |
+| Job polling | PostgreSQL job state + one-shot FastAPI polling route | Free-host compatible; each call checks FortyGuard once and persists the result |
 | HTTP client | httpx | Timeouts, mocking capability, and async-compatible client |
 | Data/model | pandas + NumPy + scikit-learn | Transparent demand model without unnecessary complexity |
 | Geospatial | Shapely + GeoPandas | Validates zones and aggregates heatmap tile data into zones |
 | Logging | Python logging, JSON-style structured events | Easy troubleshooting without exposing secrets |
-| Local setup | Docker Compose | One-command database/Redis setup across machines |
+| Local setup | Supabase project; Docker Compose optional | Hosted database for normal use; Compose remains an optional local PostGIS fallback |
 
 Do not add an LLM to calculate demand or risk. Deterministic model and rules create the source-of-truth result. If an LLM is added later, it may rewrite the already-approved structured explanation into plain language only.
 
@@ -96,13 +109,13 @@ These are one-time product decisions. Do not start data integration until the fi
 
 - FortyGuard API key. Keep only in local `.env` / deployment secrets.
 - Free EIA API key. It is needed for automated EIA downloads.
-- Optional: a Postgres host and Redis host for deployment.
+- Supabase project with PostGIS enabled and a server-side database connection string.
 - Optional: Sentry DSN for error reporting.
 
 ### Local software
 
 - Git
-- Docker Desktop (or local PostgreSQL + PostGIS and Redis)
+- Docker Desktop only if using the optional local PostgreSQL/PostGIS fallback.
 - Python 3.12
 - A package manager: `uv` is preferred; `pip` is acceptable
 - An API client for manual QA: Postman, Bruno, Insomnia, or curl
@@ -163,11 +176,8 @@ EnergyGridForutyGaurd/
 │   │   │   ├── forecasting_service.py
 │   │   │   ├── risk_service.py
 │   │   │   ├── recommendation_service.py
-│   │   │   └── replay_service.py
-│   │   ├── workers/
-│   │   │   ├── celery_app.py
-│   │   │   ├── tasks.py
-│   │   │   └── scheduler.py
+│   │   │   ├── replay_service.py
+│   │   │   └── job_polling_service.py  # one FortyGuard status check per request
 │   │   ├── data/
 │   │   │   ├── seed/
 │   │   │   └── replay/              # small, scrubbed real-source fixtures only
@@ -193,9 +203,8 @@ APP_NAME=energy-grid-api
 API_V1_PREFIX=/api/v1
 LOG_LEVEL=INFO
 
-DATABASE_URL=postgresql+psycopg://energygrid:energygrid@localhost:5432/energygrid
-REDIS_URL=redis://localhost:6379/0
-
+# Paste a Supabase server-side connection here. URL-encode special password characters.
+DATABASE_URL=postgresql+psycopg://<user>:<password>@<host>:<port>/<database>?sslmode=require
 FORTYGUARD_BASE_URL=https://api.fortyguard.com
 FORTYGUARD_API_KEY=
 FORTYGUARD_DEFAULT_GRANULARITY=80
@@ -245,7 +254,7 @@ All routes start with `/api/v1`. JSON only. ISO-8601 timestamps in UTC.
 
 | Method | Route | Purpose |
 | --- | --- | --- |
-| `GET` | `/health` | API, database, Redis, and replay-mode health |
+| `GET` | `/health` | API, database, and replay-mode health |
 | `GET` | `/cities/current` | Selected demo city and configuration |
 | `GET` | `/zones` | Active zones including GeoJSON geometry |
 | `POST` | `/zones` | Create a zone in development/admin mode |
@@ -253,7 +262,7 @@ All routes start with `/api/v1`. JSON only. ISO-8601 timestamps in UTC.
 | `GET` | `/data/demand` | Return demand observations by time range |
 | `POST` | `/heatmaps/submit` | Submit a FortyGuard heatmap job for a time/AOI |
 | `GET` | `/jobs/{job_id}` | Return our stored job status, never provider secrets |
-| `POST` | `/jobs/{job_id}/poll` | Development-only manual poll trigger |
+| `POST` | `/jobs/{job_id}/poll` | Perform exactly one provider-status check and persist the result |
 | `POST` | `/forecast/run` | Generate forecasts from available normalized inputs |
 | `GET` | `/forecasts/latest` | Latest forecast set for all zones |
 | `GET` | `/forecasts/zones/{zone_id}` | Zone timeline and explanations |
@@ -288,14 +297,14 @@ Manual QA should be performed in Postman/Bruno first. Save one collection/enviro
 2. Initialize Python project and install runtime/dev dependencies.
 3. Add FastAPI app with versioned router and `GET /api/v1/health`.
 4. Add Pydantic settings and `.env.example`.
-5. Add Docker Compose services for PostgreSQL/PostGIS and Redis.
+5. Add optional Docker Compose service for PostgreSQL/PostGIS; normal deployment uses Supabase.
 6. Add formatter/linter/type-check commands to README or Makefile.
 7. Add `.gitignore` that excludes `.env`, caches, virtual environments, and local database volumes.
 
 **Definition of done**
 
 - API starts locally.
-- `GET /api/v1/health` returns app status and says database/Redis are not yet checked or are healthy.
+- `GET /api/v1/health` returns app and database status without exposing credentials.
 - No secrets appear in tracked files.
 
 **Manual QA**
@@ -422,33 +431,39 @@ Manual QA should be performed in Postman/Bruno first. Save one collection/enviro
 
 **Handoff to next phase:** one or more persisted FortyGuard jobs, including their safe request metadata.
 
-### Phase 5 - Asynchronous polling and raw-result capture
+### Phase 5 - API-triggered polling and raw-result capture
 
-**Goal:** reliably move a submitted heatmap job to completed or failed state.
+**Goal:** reliably move a submitted heatmap job to completed or failed state without a Celery worker or
+Redis queue.
 
 **Build tasks**
 
-1. Configure Celery/Redis and worker startup commands.
-2. Create submit-follow-up/poll task(s) with bounded retry and backoff.
-3. Treat initial `404` from FortyGuard as transient; stop on case-insensitive completed/succeeded/failed/error statuses.
-4. Enforce maximum polling window from configuration.
-5. Persist provider status, completion time, safe error metadata, and raw response in controlled storage/JSON field.
-6. Add `GET /jobs/{job_id}` and development-only `POST /jobs/{job_id}/poll`.
+1. Implement one-shot job polling: `POST /jobs/{job_id}/poll` performs one FortyGuard status request,
+   persists the safe outcome, then returns immediately. It must never loop or wait for completion.
+2. Add `GET /jobs/{job_id}` to return our stored job state only, never provider credentials or signed URLs.
+3. Let the dashboard or manual QA call the polling endpoint every 5 seconds until a terminal state. This
+   is client-driven polling, not a background worker.
+4. Treat an initial `404` from FortyGuard as transient; stop on case-insensitive completed/succeeded/failed/error statuses.
+5. Enforce the existing maximum polling window from the job's `requested_at` time. A job past the window
+   becomes `timed_out` on its next poll request.
+6. Persist provider status, completion time, safe error metadata, and a size-limited raw response/summary
+   in controlled JSON storage.
 7. Do not log raw signed URLs, keys, or excessively large payloads.
 
 **Definition of done**
 
-- Worker processes a real submitted task without holding an HTTP request open.
+- A real submitted task reaches a terminal state through repeated short polling requests; no request holds
+  open waiting for a final result.
 - Job reaches `completed`, `failed`, or `timed_out` with a useful reason.
-- Restarting API/worker does not create duplicate provider submissions.
+- Restarting the API does not create duplicate provider submissions because job state is stored in PostgreSQL.
 
 **Manual QA**
 
-1. Start API, Postgres, Redis, and worker.
-2. Submit a heatmap then poll `GET /jobs/{job_id}` until terminal state.
-3. Verify the job has the expected provider activity ID and completion time.
-4. Stop/restart worker while processing; confirm job state remains recoverable.
-5. Use an intentionally invalid request and confirm it ends cleanly without retries forever.
+1. Start the API and the Supabase/PostGIS-backed database connection; no Redis or worker is required.
+2. Submit a heatmap, then call `POST /jobs/{job_id}/poll` every 5 seconds until it reaches a terminal state.
+3. Call `GET /jobs/{job_id}` between polls; verify the stored activity ID, status, and completion time.
+4. Restart the API while a job is processing, then resume one-shot polls; confirm stored job state remains recoverable.
+5. Use an intentionally invalid request and confirm it ends cleanly without unbounded retries.
 
 **Handoff to next phase:** a completed heatmap payload stored against a heatmap run.
 
@@ -608,8 +623,9 @@ Manual QA should be performed in Postman/Bruno first. Save one collection/enviro
 
 **Build tasks**
 
-1. Add a configurable scheduler cadence; start with every 60 minutes, not every few minutes.
-2. Implement cycle orchestration: submit -> poll -> normalize -> forecast -> risk -> recommend -> audit.
+1. Add a manually triggered cycle endpoint first. Optionally allow an external scheduler to call a
+   protected trigger every 60 minutes; do not require an always-on internal worker.
+2. Implement cycle orchestration: submit -> later one-shot polls -> normalize -> forecast -> risk -> recommend -> audit.
 3. Add idempotency guards so an overlapping cycle cannot create duplicate provider jobs/forecasts/recommendations.
 4. Add data-freshness rules and a stale-data status endpoint/field.
 5. Add provider-failure handling, retry limits, job timeout alerts/logs, and soft credit budget checks.
@@ -619,14 +635,15 @@ Manual QA should be performed in Postman/Bruno first. Save one collection/enviro
 
 - A scheduled/manual cycle creates one clean set of outputs without duplicate work.
 - Any failed stage leaves an understandable audit/job trail.
-- API remains responsive while workers operate.
+- API remains responsive because each provider check is a short request and no request waits for task completion.
 
 **Manual QA**
 
 1. Run a manual complete cycle and follow job status to forecast/recommendation.
 2. Trigger the cycle twice quickly; confirm only one active request exists for the same inputs.
 3. Simulate provider failure by using an invalid local key/endpoint; confirm the error is safe and visible.
-4. Confirm scheduler does not run a new cycle before the existing same-slot cycle completes.
+4. Confirm a manually triggered or externally scheduled cycle does not create a new same-slot cycle before
+   the existing one completes.
 
 **Handoff to next phase:** reliable daily/periodic orchestration.
 
@@ -693,7 +710,7 @@ Manual QA should be performed in Postman/Bruno first. Save one collection/enviro
   -> 2 Zones
   -> 3 EIA demand data
   -> 4 FortyGuard submit
-  -> 5 Worker polling
+  -> 5 API-triggered polling
   -> 6 Heatmap aggregation
   -> 7 Feature dataset
   -> 8 City demand model

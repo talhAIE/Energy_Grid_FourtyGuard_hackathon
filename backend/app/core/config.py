@@ -1,4 +1,5 @@
 from functools import lru_cache
+from typing import Literal
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -34,6 +35,32 @@ class Settings(BaseSettings):
         le=366,
         validation_alias="EIA_MAX_IMPORT_DAYS",
     )
+    fortyguard_base_url: str = Field(
+        default="https://api.fortyguard.com", validation_alias="FORTYGUARD_BASE_URL"
+    )
+    fortyguard_api_key: str | None = Field(default=None, validation_alias="FORTYGUARD_API_KEY")
+    fortyguard_default_granularity: Literal[60, 80, 100] = Field(
+        default=80,
+        validation_alias="FORTYGUARD_DEFAULT_GRANULARITY",
+    )
+    fortyguard_request_timeout_seconds: float = Field(
+        default=30,
+        gt=0,
+        le=120,
+        validation_alias="FORTYGUARD_REQUEST_TIMEOUT_SECONDS",
+    )
+    fortyguard_max_heatmap_area_sq_mi: float = Field(
+        default=50,
+        gt=0,
+        le=50,
+        validation_alias="FORTYGUARD_MAX_HEATMAP_AREA_SQ_MI",
+    )
+    fortyguard_max_forecast_hours: int = Field(
+        default=12,
+        ge=0,
+        le=24,
+        validation_alias="FORTYGUARD_MAX_FORECAST_HOURS",
+    )
 
     @field_validator("database_url", mode="before")
     @classmethod
@@ -47,6 +74,14 @@ class Settings(BaseSettings):
     @classmethod
     def empty_eia_api_key_is_none(cls, value: object) -> object:
         """Treat an empty local EIA key as absent without logging its value."""
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
+
+    @field_validator("fortyguard_api_key", mode="before")
+    @classmethod
+    def empty_fortyguard_api_key_is_none(cls, value: object) -> object:
+        """Treat an empty local FortyGuard key as absent without logging its value."""
         if isinstance(value, str) and not value.strip():
             return None
         return value

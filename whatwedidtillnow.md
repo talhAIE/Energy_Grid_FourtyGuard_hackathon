@@ -26,7 +26,7 @@ This file tracks completed work and how it was implemented. Update it at the end
 | 1 - Database foundation | Implemented; manual database QA pending | Added PostGIS Docker configuration, SQLAlchemy models, Alembic setup, initial core-schema migration, database health check, and idempotent city seed script |
 | 2 - Zone management | Implemented; manual database QA pending | Added Houston zone seed data, GeoJSON validation, zone API, allocation/overlap/boundary checks, and audit events |
 | 3 - EIA ingestion | Implemented; manual live-data QA pending | Configurable EIA/ERCOT hourly demand import, normalized storage, duplicate protection, API routes, and audit trail |
-| 4 - FortyGuard jobs | Not started | Heatmap submission and idempotency |
+| 4 - FortyGuard jobs | Implemented; manual live-provider QA pending | Validated, idempotent FortyGuard heatmap submission with persisted jobs/runs and audit trail |
 | 5 - Async polling | Not started | Celery/Redis workers and status polling |
 | 6-13 | Not started | Data aggregation, model, risk, recommendations, scheduler, replay mode, and QA pack |
 
@@ -158,6 +158,73 @@ This needs Docker Desktop or another running Postgres/PostGIS database, plus you
    a clear `422` response with `invalid_date_range`.
 9. Temporarily leave `EIA_API_KEY` blank only in your local `backend/.env`, restart the API, and import again.
    Expected: a clear `503` response with `eia_not_configured`; restore the key afterward.
+
+## Phase 4 - FortyGuard heatmap submission details
+
+### How it was implemented
+
+- Added configurable FortyGuard settings to `backend/.env.example`: base URL, server-side API key,
+  request timeout, default granularity, maximum heatmap AOI area, and 12-hour forecast-window limit.
+  The key is never returned, logged, or stored in database fields.
+- Added `app/services/fortyguard_client.py`, which isolates request construction and sends only the
+  documented `api-key` header to `POST /v1/heatmap`. It accepts a successful response only when it
+  contains a non-empty `data.activity_id` and turns provider failures into safe error messages.
+- Added strict heatmap request validation:
+  - one closed GeoJSON Polygon inside a FeatureCollection;
+  - a supported U.S. envelope and containment within the selected Houston demo boundary;
+  - a locally calculated area at or below the configured plan limit;
+  - valid filter-dependent date/time fields, dates from 2019-01-01 onward, and the configured
+    future limit;
+  - granularity only `60`, `80`, or `100` metres; and analytic type only `tcm` for this MVP.
+- Added `heatmap_runs` model and Alembic migration `20260827_0003`. It saves safe request context:
+  internal job ID, UTC requested time, granularity, analytic type, AOI geometry, date-time filter,
+  and source kind. It does not store API keys or provider headers.
+- Added `POST /api/v1/heatmaps/submit`. It reserves an internal `integration_jobs` row with a canonical
+  SHA-256 request hash before calling FortyGuard, then stores the returned `activity_id` and returns
+  HTTP `202`. The HTTP request waits only for submission acknowledgement, never for final map results.
+- An identical request returns the existing active/completed job with `reused: true`, preventing a
+  duplicate paid submission. A provider timeout or uncertain failure is deliberately not retried.
+- Added audit events for submission start, successful submission, provider submission failure, and
+  service-level validation failure.
+- Updated `backend/README.md` with an exact small-AOI manual request and expected results.
+
+### Verification performed
+
+- Static lint and Python compilation: passed.
+- FastAPI OpenAPI validation: `POST /api/v1/heatmaps/submit` is registered.
+- Heatmap request schema and GeoJSON validation: passed with a small Houston-area Polygon; the provider
+  payload strips unneeded caller properties and calculates its area.
+- Canonical request hashing: semantically identical payloads produce the same hash.
+- Heatmap-run model metadata validation: the one-run-per-job uniqueness rule is registered.
+- Alembic migration graph validation: `20260827_0003` correctly follows the EIA migration chain.
+
+### Manual QA still required
+
+This requires a running PostGIS database and your local `FORTYGUARD_API_KEY` in `backend/.env`. Do not
+paste the key into chat or commit it. The task is charged only on successful provider completion, so use
+the small AOI below and do not repeatedly vary it during a test.
+
+1. From `backend/`, set the FortyGuard variables listed in `.env.example`. Keep
+   `FORTYGUARD_MAX_HEATMAP_AREA_SQ_MI=50` only if it matches the plan attached to your key.
+2. Run `docker compose up --build -d`, then `docker compose exec api alembic upgrade head` and
+   `docker compose exec api python -m app.scripts.seed_city`.
+3. In `/docs`, call `POST /api/v1/heatmaps/submit` using the small Houston FeatureCollection in
+   `backend/README.md`, granularity `80` or `100`, and analytic type `tcm`.
+4. Expected: HTTP `202`, a non-empty internal `job_id`, `status: "submitted"`, and non-empty
+   `activity_id`. Confirm no key appears in the response or logs.
+5. Submit exactly the same body again. Expected: the original IDs and `reused: true`; the audit trail
+   must not show a second provider submission.
+6. Submit an unclosed polygon, a polygon outside the Houston demo boundary, `granularity: 70`, or
+   analytic type other than `tcm`. Expected: `400 invalid_heatmap_request`, no `activity_id`, and a
+   `heatmap.validation_failed` audit event for service-level failures.
+7. Temporarily remove only `FORTYGUARD_API_KEY` from local `backend/.env` and restart the API. Submit
+   a valid request. Expected: `503 fortyguard_not_configured`; restore the key afterward.
+
+### Known boundary for the next phase
+
+- Phase 4 deliberately stops after submission acknowledgement. It does not poll `/v1/status/{activity_id}`
+  and does not expose a job-status endpoint yet. Phase 5 will add Celery/Redis polling, transient-404
+  handling, terminal status updates, and controlled result capture.
 
 ## Secrets reminder
 
