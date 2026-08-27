@@ -187,3 +187,46 @@ Phase 4 submits a heatmap task and returns after FortyGuard acknowledges its `ac
 6. Try a non-closed polygon, an AOI outside the demo city, `granularity: 70`, an unsupported analytic
    type, or an AOI larger than the configured area limit. Expected: a clear `400` response and no
    FortyGuard request.
+
+## Phase 5 FortyGuard one-shot polling
+
+Phase 5 uses **client-triggered polling**, not a Redis queue or a background worker. After a successful
+submission, call the poll route about every five seconds until the stored job becomes `completed`, `failed`,
+or `timed_out`. Each request makes only one FortyGuard status call and returns immediately.
+
+1. Make sure `FORTYGUARD_POLL_SECONDS=5` and `FORTYGUARD_MAX_POLL_SECONDS=600` are present in
+   `backend/.env`. The latter is a hard total polling window measured from job submission time.
+
+2. Migrate the new polling fields after starting your PostGIS database:
+
+   ```powershell
+   docker compose exec api alembic upgrade head
+   ```
+
+3. Submit a valid map with `POST /api/v1/heatmaps/submit`, then copy only the returned internal `job_id`.
+
+4. Call `POST /api/v1/jobs/{job_id}/poll` every five seconds. It returns stored state, for example:
+
+   ```json
+   {
+     "data": {
+       "job_id": "your-internal-job-id",
+       "status": "processing",
+       "provider_status": "processing",
+       "activity_id": "fortyguard-activity-id",
+       "poll_attempts": 1,
+       "raw_response_available": true
+     }
+   }
+   ```
+
+5. Use `GET /api/v1/jobs/{job_id}` between polls to read the persisted state without making an external
+   request. It intentionally never returns the raw heatmap payload, signed URLs, headers, or credentials.
+
+6. A `404` immediately after task submission is treated as temporary: the job remains `processing` with
+   `provider_status: "not_found"`; wait five seconds and poll again. `completed`/`succeeded` become
+   internal `completed`; `failed`/`error` become internal `failed`. A job is changed to `timed_out` if it
+   is polled after its configured maximum window.
+
+The backend saves only a scrubbed, size-limited provider response/summary for future normalization. It does
+not log or expose API keys, signed URLs, or oversized heatmap payloads.

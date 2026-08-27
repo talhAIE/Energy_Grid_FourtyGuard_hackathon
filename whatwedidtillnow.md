@@ -27,7 +27,7 @@ This file tracks completed work and how it was implemented. Update it at the end
 | 2 - Zone management | Implemented; manual database QA pending | Added Houston zone seed data, GeoJSON validation, zone API, allocation/overlap/boundary checks, and audit events |
 | 3 - EIA ingestion | Implemented; manual live-data QA pending | Configurable EIA/ERCOT hourly demand import, normalized storage, duplicate protection, API routes, and audit trail |
 | 4 - FortyGuard jobs | Implemented; manual live-provider QA pending | Validated, idempotent FortyGuard heatmap submission with persisted jobs/runs and audit trail |
-| 5 - Async polling | Not started | Celery/Redis workers and status polling |
+| 5 - API-triggered polling | Implemented; manual live-provider QA pending | One-shot status polling, durable job state, controlled provider response storage, and job-state API |
 | 6-13 | Not started | Data aggregation, model, risk, recommendations, scheduler, replay mode, and QA pack |
 
 ## Phase 0 - Foundation details
@@ -223,8 +223,68 @@ the small AOI below and do not repeatedly vary it during a test.
 ### Known boundary for the next phase
 
 - Phase 4 deliberately stops after submission acknowledgement. It does not poll `/v1/status/{activity_id}`
-  and does not expose a job-status endpoint yet. Phase 5 will add Celery/Redis polling, transient-404
-  handling, terminal status updates, and controlled result capture.
+  and does not expose a job-status endpoint yet. Phase 5 adds client-triggered one-shot polling,
+  transient-404 handling, terminal status updates, and controlled result capture without Redis/Celery.
+
+## Phase 5 - API-triggered polling and raw-result capture details
+
+### How it was implemented
+
+- Followed the current implementation plan's client-triggered approach: Phase 5 uses no Redis queue or
+  Celery worker. Every `POST /api/v1/jobs/{job_id}/poll` call performs one FortyGuard status request,
+  persists the outcome, and returns without waiting for task completion.
+- Added `GET /api/v1/jobs/{job_id}` for safe persisted job state and
+  `POST /api/v1/jobs/{job_id}/poll` for one-shot polling. Both expose only safe metadata such as status,
+  activity ID, timestamps, poll count, error code, and raw-response availability.
+- Extended `integration_jobs` with `provider_status`, `poll_attempts`, `last_polled_at`, and controlled
+  `raw_response_json`; migration `20260827_0004` adds the fields and provider-status index.
+- Extended the isolated FortyGuard client with `GET /v1/status/{activity_id}`. It recognizes the initial
+  `404` as transient and returns no raw provider body for that case. It recognizes provider terminal
+  statuses case-insensitively: `completed`/`succeeded` and `failed`/`error`.
+- Added a hard polling deadline based on `requested_at` and `FORTYGUARD_MAX_POLL_SECONDS`. The next poll
+  after the deadline changes the internal job to `timed_out` with `poll_window_exceeded`.
+- Stored provider responses only after recursively redacting API-key/token/secret/signature/download/URL
+  fields, limiting list entries and nesting, and enforcing `FORTYGUARD_MAX_RAW_RESPONSE_BYTES`. Oversized
+  payloads are replaced by a hash-and-size summary. Raw content is never returned by the job APIs.
+- Added audit events for completed, failed, timed-out, and temporarily unavailable polls. A short-lived
+  404 remains `processing` so the dashboard or QA can safely make the next short poll.
+- Updated `backend/README.md` with the API polling procedure. The older Phase 4 boundary is superseded:
+  job-status routes and one-shot polling are now implemented.
+
+### Verification performed
+
+- Static lint and Python compilation: passed.
+- FastAPI OpenAPI validation: both job routes are registered.
+- Mocked FortyGuard status response: provider status parsing passed without a live API call.
+- Controlled response validation: API-key and signed-URL fields are redacted; large lists are limited.
+- Integration-job model metadata validation: the four polling fields are registered.
+- Alembic migration graph validation: `20260827_0004` correctly follows the heatmap-run migration.
+
+### Manual QA still required
+
+This requires PostGIS and your local `FORTYGUARD_API_KEY` in `backend/.env`; Redis and a Celery worker are
+not required for this phase. Do not paste the key into chat or commit it.
+
+1. Start the API with its PostGIS database connection, then run
+   `docker compose exec api alembic upgrade head` (or the equivalent command for your configured database).
+2. Submit the small valid Houston heatmap request from `backend/README.md`; keep its returned `job_id`.
+3. Call `POST /api/v1/jobs/{job_id}/poll` every five seconds until `status` is terminal. Each call should
+   return promptly, never hold open to wait for completion.
+4. Between polls call `GET /api/v1/jobs/{job_id}`. Confirm activity ID, provider status, poll attempt
+   count, last-poll time, and final completion time persist across requests.
+5. Restart the API while the job is still `processing`. Continue manual polls afterward; confirm the same
+   job state is recovered and no second submission occurs.
+6. If the first status poll gets a provider `404`, expect internal `status: "processing"` and
+   `provider_status: "not_found"`. Wait five seconds and poll again instead of treating it as a failure.
+7. Reduce `FORTYGUARD_MAX_POLL_SECONDS` temporarily in local configuration, submit a job, wait past that
+   limit, then poll once. Expected: `status: "timed_out"` and `error_code: "poll_window_exceeded"`.
+8. Confirm `GET /api/v1/jobs/{job_id}` never exposes `raw_response_json`, signed URLs, provider headers,
+   or either API key.
+
+### Known boundary for the next phase
+
+- Phase 5 stores a scrubbed completed provider response but does not parse the heatmap tiles. Phase 6 will
+  validate the completed `map_data` GeoJSON and aggregate it into zone temperature observations.
 
 ## Secrets reminder
 

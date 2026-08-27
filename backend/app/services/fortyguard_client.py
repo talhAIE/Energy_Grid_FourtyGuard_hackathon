@@ -30,6 +30,15 @@ class FortyGuardResponseError(FortyGuardError):
     """Raised when a successful HTTP response lacks a usable activity ID."""
 
 
+class FortyGuardPollError(FortyGuardError):
+    """Raised when a status request cannot produce a valid provider status."""
+
+    def __init__(self, message: str, *, error_code: str, retryable: bool) -> None:
+        super().__init__(message)
+        self.error_code = error_code
+        self.retryable = retryable
+
+
 @dataclass(frozen=True)
 class HeatmapProviderRequest:
     """Only the safe request fields needed by FortyGuard's heatmap endpoint."""
@@ -45,6 +54,15 @@ class FortyGuardSubmission:
     """Safe submission acknowledgement returned to the application service."""
 
     activity_id: str
+
+
+@dataclass(frozen=True)
+class FortyGuardPollResult:
+    """One status response, including the expected short-lived post-submit 404 case."""
+
+    provider_status: str | None
+    response_payload: dict[str, Any]
+    transient_not_found: bool = False
 
 
 def build_heatmap_payload(request: HeatmapProviderRequest) -> dict[str, Any]:
@@ -124,3 +142,66 @@ class FortyGuardClient:
                 "FortyGuard did not return an activity ID for the heatmap job."
             )
         return FortyGuardSubmission(activity_id=activity_id.strip())
+
+    def get_status(self, activity_id: str) -> FortyGuardPollResult:
+        """Perform exactly one status request; callers decide when to issue the next poll."""
+        try:
+            with httpx.Client(timeout=httpx.Timeout(self._timeout)) as client:
+                response = client.get(
+                    f"{self._base_url}/v1/status/{activity_id}",
+                    headers={"api-key": self._api_key},
+                )
+        except httpx.TimeoutException as exc:
+            raise FortyGuardPollError(
+                "FortyGuard status request timed out. Try another short poll later.",
+                error_code="poll_timeout",
+                retryable=True,
+            ) from exc
+        except httpx.HTTPError as exc:
+            raise FortyGuardPollError(
+                "FortyGuard status request failed. Try another short poll later.",
+                error_code="poll_request_failed",
+                retryable=True,
+            ) from exc
+
+        if response.status_code == 404:
+            return FortyGuardPollResult(
+                provider_status=None,
+                response_payload={"http_status": 404, "transient": True},
+                transient_not_found=True,
+            )
+        if response.is_error:
+            retryable = response.status_code == 429 or response.status_code >= 500
+            raise FortyGuardPollError(
+                f"FortyGuard status request returned HTTP {response.status_code}.",
+                error_code=f"poll_http_{response.status_code}",
+                retryable=retryable,
+            )
+
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise FortyGuardPollError(
+                "FortyGuard returned an unreadable status response.",
+                error_code="poll_invalid_response",
+                retryable=False,
+            ) from exc
+        if not isinstance(payload, dict):
+            raise FortyGuardPollError(
+                "FortyGuard returned an unexpected status response.",
+                error_code="poll_invalid_response",
+                retryable=False,
+            )
+
+        data = payload.get("data")
+        status_value = data.get("status") if isinstance(data, dict) else payload.get("status")
+        if not isinstance(status_value, str) or not status_value.strip():
+            raise FortyGuardPollError(
+                "FortyGuard status response did not include a task status.",
+                error_code="poll_missing_status",
+                retryable=False,
+            )
+        return FortyGuardPollResult(
+            provider_status=status_value.strip(),
+            response_payload=payload,
+        )

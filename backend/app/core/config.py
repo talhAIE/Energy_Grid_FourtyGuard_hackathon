@@ -61,6 +61,24 @@ class Settings(BaseSettings):
         le=24,
         validation_alias="FORTYGUARD_MAX_FORECAST_HOURS",
     )
+    fortyguard_poll_seconds: int = Field(
+        default=5,
+        ge=1,
+        le=60,
+        validation_alias="FORTYGUARD_POLL_SECONDS",
+    )
+    fortyguard_max_poll_seconds: int = Field(
+        default=600,
+        ge=30,
+        le=3600,
+        validation_alias="FORTYGUARD_MAX_POLL_SECONDS",
+    )
+    fortyguard_max_raw_response_bytes: int = Field(
+        default=262_144,
+        ge=4_096,
+        le=1_048_576,
+        validation_alias="FORTYGUARD_MAX_RAW_RESPONSE_BYTES",
+    )
 
     @field_validator("database_url", mode="before")
     @classmethod

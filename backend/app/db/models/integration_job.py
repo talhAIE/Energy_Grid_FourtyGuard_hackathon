@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, String, UniqueConstraint
+from sqlalchemy import JSON, DateTime, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -25,4 +25,7 @@ class IntegrationJob(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     error_code: Mapped[str | None] = mapped_column(String(100), nullable=True)
-
+    provider_status: Mapped[str | None] = mapped_column(String(100), index=True, nullable=True)
+    poll_attempts: Mapped[int] = mapped_column(Integer, default=0)
+    last_polled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    raw_response_json: Mapped[dict[str, object] | None] = mapped_column(JSON, nullable=True)

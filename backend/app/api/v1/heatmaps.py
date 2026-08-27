@@ -28,7 +28,7 @@ def post_heatmap_submit(
     payload: HeatmapSubmitRequest,
     session: Session = Depends(get_db_session),
 ) -> HeatmapSubmitResponse:
-    """Return after submission acknowledgement only; task polling is implemented in Phase 5."""
+    """Return after submission acknowledgement only; poll later through the jobs API."""
     try:
         job = submit_heatmap(session=session, payload=payload)
     except HeatmapValidationError as exc:
