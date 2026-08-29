@@ -310,3 +310,52 @@ explicit development/training step, not a request that a dashboard should run.
 5. Manual QA: check CDH at 16, 18, 20, 25, and 30 Celsius with the 18 Celsius baseline; expected values
    are 0, 0, 2, 7, and 12. Also inspect rows around a Houston daylight-saving transition and confirm the
    quality report clearly counts partial/missing temperature rows.
+
+## Phase 8 baseline city-demand model
+
+Phase 8 uses a transparent ordinary least-squares regression to estimate **city/grid-area demand**, not
+feeder-level or zone-level demand. It combines Cooling Degree Hours, local calendar fields, and actual demand
+from exactly one hour and 24 hours earlier. The model never trains on partial/missing-temperature rows and
+never fills missing values.
+
+1. Install the updated project dependencies after pulling Phase 8:
+
+   ```powershell
+   python -m pip install -e ".[dev]"
+   ```
+
+2. Apply the model-version migration after your PostGIS database is available:
+
+   ```powershell
+   alembic upgrade head
+   ```
+
+3. Build a Phase 7 feature CSV with a sufficiently long complete-temperature history. By default, the model
+   needs at least 72 training rows plus a later validation period after 1-hour/24-hour lags are formed.
+
+4. Train and activate the model using the exact generated CSV path:
+
+   ```powershell
+   python -m app.scripts.train_model --dataset .\app\data\generated\features\features-v1-your-version.csv
+   ```
+
+   The model JSON and validation-prediction CSV are written to `MODEL_ARTIFACT_DIR` (default:
+   `app/data/generated/models/`) and are ignored by Git. The validation CSV is the manual-QA chart/export.
+
+5. Inspect the active model and metrics with `GET /api/v1/forecast/models/active`.
+
+6. Call `POST /api/v1/forecast/run` with `{}` to select the next usable future temperature time, or supply a
+   specific time:
+
+   ```json
+   {
+     "forecast_for": "2025-08-08T12:00:00Z"
+   }
+   ```
+
+   The route returns `estimate_type: "estimate"`, the explicit model version, validation-safe input details,
+   and predicted demand in MW. It returns a clear error rather than guessing if the model artifact, complete
+   zone temperatures, or 1-hour/24-hour demand lags are unavailable.
+
+7. Read the [baseline model contract](docs/baseline-model-contract.md) before using the metrics. It documents
+   the chronological split, feature eligibility, artifact format, and forecast safety rules.

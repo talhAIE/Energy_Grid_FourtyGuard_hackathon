@@ -8,8 +8,8 @@ This file tracks completed work and how it was implemented. Update it at the end
 - **Demo location:** Houston, Texas, using ERCOT data for real historical grid-demand calibration.
 - **Core data:** FortyGuard heatmaps for temperature and EIA/ERCOT sources for historical demand.
 - **Safety boundary:** recommendations only; never direct control of electric-grid equipment.
-- **Backend stack:** Python 3.12, FastAPI, PostgreSQL/PostGIS, SQLAlchemy, Alembic, and client-triggered
-  provider polling (no Redis/Celery worker).
+- **Backend stack:** Python 3.12, FastAPI, PostgreSQL/PostGIS, SQLAlchemy, Alembic, NumPy-backed transparent
+  baseline regression, and client-triggered provider polling (no Redis/Celery worker).
 
 ## Documentation completed
 
@@ -31,7 +31,8 @@ This file tracks completed work and how it was implemented. Update it at the end
 | 5 - API-triggered polling | Implemented; manual live-provider QA pending | One-shot status polling, durable job state, controlled provider response storage, and job-state API |
 | 6 - Heatmap normalization | Implemented; manual live-provider QA pending | Automatic tile parsing, centroid-based zone aggregation, missing-zone markers, and temperature timeline API |
 | 7 - Feature dataset | Implemented; manual dataset QA pending | Versioned CSV/quality report, UTC/local time alignment, Cooling Degree Hours, calendar features, and explicit missing-temperature labels |
-| 8-13 | Not started | Model, risk, recommendations, scheduler, replay mode, and QA pack |
+| 8 - Baseline demand model | Implemented; manual model/database QA pending | Chronological OLS training, stored metrics/model versions, JSON artifact, validation export, and safeguarded city forecast API |
+| 9-13 | Not started | Zone risk, recommendations, scheduler, replay mode, and QA pack |
 
 ## Phase 0 - Foundation details
 
@@ -411,9 +412,78 @@ EIA demand, and normalized zone temperatures. Do not paste either API key into c
 
 ### Known boundary for the next phase
 
-- Phase 7 creates documented, quality-labeled training data only. Phase 8 will use an explicit chronological
-  split to train and evaluate a city-level baseline forecast model; it must decide which quality states are
-  eligible and must not treat null values as zero.
+- Resolved in Phase 8: an explicit active city-level baseline model can be trained chronologically and used for
+  a clearly labeled demand estimate when all required inputs are present.
+
+## Phase 8 - Baseline demand forecast model details
+
+### How it was implemented
+
+- Added `model_versions` and Alembic migration `20260827_0006`. Each record stores the city, deterministic
+  model version, algorithm, source dataset SHA-256, training/validation periods and row counts, MAE/RMSE/MAPE,
+  artifact paths, feature metadata, and explicit active state.
+- Added a transparent NumPy ordinary least-squares model. The JSON artifact contains the intercept and ordered
+  coefficients for Cooling Degree Hours, local calendar fields, and 1-hour/24-hour lagged demand; it is not an
+  opaque pickled model.
+- Added `python -m app.scripts.train_model --dataset <Phase-7-CSV>`. It validates the CSV contract, accepts
+  only actual-demand rows with `complete` temperature coverage and usable CDH/lags, and preserves chronological
+  order. No missing input is interpolated or treated as zero.
+- Added a configurable chronological holdout split (80% training / 20% validation by default), a 72-row minimum
+  training guard, and MAE/RMSE/MAPE calculation. The latest validation period is never shuffled into training.
+- Training writes a versioned JSON artifact and a validation CSV containing timestamp, actual MW, predicted MW,
+  and absolute error. Both live under the ignored generated-data directory for manual charting/review.
+- Added one explicit active model per city. Training activates the new version and deactivates prior versions;
+  repeating unchanged training input reuses the deterministic stored version instead of creating a duplicate.
+- Added forecast API routes:
+  - `GET /api/v1/forecast/models/active` returns active-model metadata and validation metrics.
+  - `POST /api/v1/forecast/run` estimates city/grid-area demand for a requested or next usable temperature time.
+- The forecast route requires a readable active artifact, actual demand exactly one and 24 hours earlier, and
+  complete same-time temperature coverage for every active zone. It rejects missing/partial inputs visibly and
+  returns `estimate_type: "estimate"`; it does not create zone risk, allocate zone demand, or control equipment.
+- Added `docs/baseline-model-contract.md`, Phase 8 configuration examples, operating steps, and manual QA
+  guidance. Added NumPy as an explicit runtime dependency.
+
+### Verification performed
+
+- Static lint and Python compilation: passed.
+- Synthetic chronological CSV check: 150 hourly rows generated 100 training and 25 validation examples after
+  the 1-hour/24-hour lag and incomplete-temperature exclusion rules. Ordinary least-squares fitting, prediction,
+  MAE/RMSE/MAPE, and deterministic version generation passed.
+- FastAPI OpenAPI validation: `GET /api/v1/forecast/models/active` and `POST /api/v1/forecast/run` are
+  registered.
+- Training command help was checked. No live EIA, FortyGuard, database migration, artifact write, or forecast
+  was run because the required PostGIS data/manual-QA setup is not yet available.
+
+### Manual QA still required
+
+This requires completed Phase 1, 3, 6, and 7 database/manual QA, including sufficient **complete** historical
+feature rows and future/selected temperature coverage. Do not paste API keys into chat or commit `backend/.env`.
+
+1. From `backend/`, install the Phase 8 dependency with `python -m pip install -e ".[dev]"`, then run
+   `alembic upgrade head` against the PostGIS database.
+2. Build a Phase 7 CSV for a documented historical period. Ensure enough consecutive complete rows remain after
+   1-hour/24-hour lags for at least 72 training rows plus validation rows; a week of hourly data is a practical
+   minimum for the default setting.
+3. Run `python -m app.scripts.train_model --dataset <exact-feature-csv-path>`. Record the printed model version,
+   artifact path, validation CSV path, MAE, RMSE, and MAPE.
+4. Call `GET /api/v1/forecast/models/active`. Confirm it returns the same version, algorithm, source dataset,
+   chronological periods, row counts, and metrics as training output.
+5. Open the validation CSV in a spreadsheet and chart/compare actual versus predicted MW. Confirm validation
+   timestamps occur strictly after the training period and are not included in the training rows.
+6. Call `POST /api/v1/forecast/run` with a selected time that has complete zone temperatures plus actual demand
+   at exactly one and 24 hours earlier. Confirm the response is `estimate_type: "estimate"`, contains the active
+   model version and predicted MW, and never calls it a measured feeder/zone value.
+7. Try a time with partial/missing zone temperatures, a missing lag, and an absent/corrupted local artifact.
+   Confirm each returns a readable safe error (`forecast_input_not_ready` or `model_artifact_unavailable`) rather
+   than an invented forecast. Restore the artifact afterward.
+8. Train the identical CSV again. Confirm it reuses the same deterministic model version. Train a changed
+   dataset or configuration and confirm a new model version becomes active while the prior version remains stored.
+
+### Known boundary for the next phase
+
+- Phase 8 produces only a city/grid-area demand estimate. Phase 9 will allocate that estimate to zones as an
+  explicitly labeled proxy, calculate deterministic heat/demand risk scores and confidence, and persist zone
+  forecast outputs. It must not claim actual feeder demand.
 
 ## Secrets reminder
 

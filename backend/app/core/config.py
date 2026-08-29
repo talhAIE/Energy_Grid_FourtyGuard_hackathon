@@ -33,6 +33,22 @@ class Settings(BaseSettings):
         default="app/data/generated/features",
         validation_alias="FEATURE_DATASET_DIR",
     )
+    model_artifact_dir: str = Field(
+        default="app/data/generated/models",
+        validation_alias="MODEL_ARTIFACT_DIR",
+    )
+    model_validation_fraction: float = Field(
+        default=0.2,
+        gt=0,
+        le=0.5,
+        validation_alias="MODEL_VALIDATION_FRACTION",
+    )
+    model_min_training_rows: int = Field(
+        default=72,
+        ge=24,
+        le=100_000,
+        validation_alias="MODEL_MIN_TRAINING_ROWS",
+    )
     eia_base_url: str = Field(default="https://api.eia.gov/v2", validation_alias="EIA_BASE_URL")
     eia_api_key: str | None = Field(default=None, validation_alias="EIA_API_KEY")
     eia_demand_route: str = Field(

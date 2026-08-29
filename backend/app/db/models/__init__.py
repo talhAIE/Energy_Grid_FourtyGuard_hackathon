@@ -5,6 +5,7 @@ from app.db.models.city import City
 from app.db.models.demand_observation import DemandObservation
 from app.db.models.heatmap_run import HeatmapRun
 from app.db.models.integration_job import IntegrationJob
+from app.db.models.model_version import ModelVersion
 from app.db.models.zone import Zone
 from app.db.models.zone_temperature_observation import ZoneTemperatureObservation
 
@@ -14,6 +15,7 @@ __all__ = [
     "DemandObservation",
     "HeatmapRun",
     "IntegrationJob",
+    "ModelVersion",
     "Zone",
     "ZoneTemperatureObservation",
 ]
