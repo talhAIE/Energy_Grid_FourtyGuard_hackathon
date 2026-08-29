@@ -21,7 +21,14 @@ def get_zones(
     session: Session = Depends(get_db_session),
 ) -> ZoneListResponse:
     """Return zone geometry and allocation weights for the configured demo city."""
-    return ZoneListResponse(data=list_zones(session=session, active_only=active_only))
+    try:
+        zones = list_zones(session=session, active_only=active_only)
+    except ZoneNotReadyError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": "zone_service_unavailable", "message": str(exc)},
+        ) from exc
+    return ZoneListResponse(data=zones)
 
 
 @router.post(

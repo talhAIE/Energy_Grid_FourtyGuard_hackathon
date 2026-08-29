@@ -10,7 +10,7 @@ from uuid import UUID
 
 from geoalchemy2.shape import to_shape
 from shapely.geometry.base import BaseGeometry
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.db.models.heatmap_run import HeatmapRun
@@ -201,7 +201,9 @@ def list_zone_temperatures(
     end: datetime,
     zone_id: UUID | None = None,
     include_missing: bool = True,
-) -> list[ZoneTemperatureData]:
+    limit: int = 100,
+    offset: int = 0,
+) -> tuple[list[ZoneTemperatureData], int]:
     """Return a chronological, bounded zone temperature timeline from persisted observations."""
     start_utc = _ensure_utc(start)
     end_utc = _ensure_utc(end)
@@ -220,8 +222,9 @@ def list_zone_temperatures(
         statement = statement.where(ZoneTemperatureObservation.zone_id == zone_id)
     if not include_missing:
         statement = statement.where(ZoneTemperatureObservation.data_status == "available")
-    observations = session.scalars(statement).all()
-    return [_to_temperature_data(observation) for observation in observations]
+    total = session.scalar(select(func.count()).select_from(statement.subquery())) or 0
+    observations = session.scalars(statement.offset(offset).limit(limit)).all()
+    return [_to_temperature_data(observation) for observation in observations], total
 
 
 def _extract_map_data(provider_response: dict[str, Any]) -> dict[str, Any]:

@@ -15,6 +15,10 @@ class Settings(BaseSettings):
     app_name: str = Field(default="energy-grid-api", validation_alias="APP_NAME")
     api_v1_prefix: str = Field(default="/api/v1", validation_alias="API_V1_PREFIX")
     log_level: str = Field(default="INFO", validation_alias="LOG_LEVEL")
+    cors_allowed_origins: str = Field(
+        default="http://localhost:3000,http://127.0.0.1:3000",
+        validation_alias="CORS_ALLOWED_ORIGINS",
+    )
     replay_mode: bool = Field(default=False, validation_alias="REPLAY_MODE")
     database_url: str | None = Field(default=None, validation_alias="DATABASE_URL")
     demo_city_name: str = Field(default="Houston, Texas", validation_alias="DEMO_CITY_NAME")
@@ -192,6 +196,15 @@ class Settings(BaseSettings):
         if isinstance(value, str) and not value.strip():
             return None
         return value
+
+    @property
+    def parsed_cors_allowed_origins(self) -> list[str]:
+        """Return a small, explicit origin allowlist from comma-separated local configuration."""
+        return [
+            origin.strip().rstrip("/")
+            for origin in self.cors_allowed_origins.split(",")
+            if origin.strip()
+        ]
 
 
 @lru_cache

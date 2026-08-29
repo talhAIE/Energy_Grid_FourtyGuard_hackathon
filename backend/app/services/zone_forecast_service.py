@@ -7,7 +7,7 @@ from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
@@ -296,8 +296,10 @@ def list_zone_forecasts(
     zone_id: UUID,
     start: datetime | None = None,
     end: datetime | None = None,
+    limit: int = 100,
+    offset: int = 0,
     settings: Settings | None = None,
-) -> list[ZoneForecast]:
+) -> tuple[list[ZoneForecast], int]:
     """Return a bounded historical/future forecast timeline for one configured-city zone."""
     settings = settings or get_settings()
     city = _get_demo_city(session=session, settings=settings)
@@ -311,7 +313,7 @@ def list_zone_forecasts(
         raise ZoneForecastError("End time must be later than start time.")
     if end_utc - start_utc > timedelta(days=366):
         raise ZoneForecastError("Zone forecast range cannot exceed 366 days.")
-    return session.scalars(
+    statement = (
         select(ZoneForecast)
         .where(
             ZoneForecast.zone_id == zone.id,
@@ -319,7 +321,9 @@ def list_zone_forecasts(
             ZoneForecast.forecast_for <= end_utc,
         )
         .order_by(ZoneForecast.forecast_for, ZoneForecast.generated_at)
-    ).all()
+    )
+    total = session.scalar(select(func.count()).select_from(statement.subquery())) or 0
+    return session.scalars(statement.offset(offset).limit(limit)).all(), total
 
 
 def _latest_zone_temperatures(

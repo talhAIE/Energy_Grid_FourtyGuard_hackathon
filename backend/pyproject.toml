@@ -25,6 +25,7 @@ include = ["app*"]
 
 [project.optional-dependencies]
 dev = [
+    "mypy>=1.13,<2.0",
     "ruff>=0.8,<1.0",
 ]
 
@@ -37,3 +38,22 @@ select = ["E", "F", "I"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["app"]
+
+[tool.mypy]
+python_version = "3.12"
+files = [
+    "app/main.py",
+    "app/core/config.py",
+    "app/api/v1/audit.py",
+    "app/api/v1/data.py",
+    "app/api/v1/forecasts.py",
+    "app/api/v1/recommendations.py",
+    "app/api/v1/temperatures.py",
+    "app/api/v1/zones.py",
+    "app/services/audit_service.py",
+    "app/schemas",
+]
+follow_imports = "skip"
+check_untyped_defs = true
+warn_unused_ignores = true
+no_implicit_optional = true

@@ -3,7 +3,7 @@ from decimal import Decimal
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.schemas.common import DataModeResponse
 
@@ -51,3 +51,6 @@ class ZoneForecastSetResponse(DataModeResponse):
 class ZoneForecastTimelineResponse(DataModeResponse):
     data: list[ZoneForecastData]
     count: int
+    total: int
+    limit: int = Field(ge=1, le=500)
+    offset: int = Field(ge=0)

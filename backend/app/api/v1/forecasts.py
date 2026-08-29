@@ -60,11 +60,20 @@ def get_zone_forecast_timeline(
         description="Optional inclusive ISO-8601 UTC start.",
     ),
     end: datetime | None = Query(default=None, description="Optional inclusive ISO-8601 UTC end."),
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0, le=1_000_000),
     session: Session = Depends(get_db_session),
 ) -> ZoneForecastTimelineResponse:
     """Return at most 366 days of stored proxy forecasts; default range is recent/future week."""
     try:
-        forecasts = list_zone_forecasts(session=session, zone_id=zone_id, start=start, end=end)
+        forecasts, total = list_zone_forecasts(
+            session=session,
+            zone_id=zone_id,
+            start=start,
+            end=end,
+            limit=limit,
+            offset=offset,
+        )
     except ZoneForecastNotFoundError as exc:
         raise _http_error(404, "zone_not_found", str(exc)) from exc
     except ZoneForecastError as exc:
@@ -83,6 +92,9 @@ def get_zone_forecast_timeline(
             for forecast in forecasts
         ],
         count=len(forecasts),
+        total=total,
+        limit=limit,
+        offset=offset,
     )
 
 

@@ -36,7 +36,7 @@ This file tracks completed work and how it was implemented. Update it at the end
 | 10 - Recommendations and approvals | Implemented; manual model/database QA pending | Guarded recommendations, bounded action catalogue, immutable human decisions, expiry/supersession, and audit trail |
 | 11 - Pipeline and safeguards | Implemented; manual live-provider/database QA pending | Durable manually advanced pipeline cycles, one-shot orchestration, idempotency, freshness state, poll limits, and soft submission budget |
 | 12 - Replay mode and demo reliability | Implemented; manual database QA pending | Offline 12-hour Houston scenario, protected replay endpoints, persisted standard records, and visible `data_mode` API disclosure |
-| 13 - API hardening and QA pack | Not started | API contract, runbook, CORS, and full final QA documentation |
+| 13 - API hardening and QA pack | Implemented; Docker/PostGIS and live-provider QA pending | Stable pagination/error contracts, audit-history API, restrictive CORS, API contract, startup runbook, and end-to-end manual QA pack |
 
 ## Phase 0 - Foundation details
 
@@ -739,8 +739,64 @@ blank in ignored `backend/.env`.
 - The repository does not contain a completed real-provider capture, so the committed numbers are clearly labeled
   deterministic representative replay data. An approved scrubbed FortyGuard/EIA capture can replace those values
   later without changing the replay contract.
-- Phase 13 will expose the already-persisted audit history, document the final API contract and end-to-end runbook,
-  review CORS and error hardening, and execute the full fresh-database/production-style QA pack.
+- Resolved in Phase 13: audit history is readable through a redacted, paginated API and the final contract,
+  startup/deployment guide, CORS policy, and end-to-end QA pack are documented. Environment-backed QA remains
+  listed below.
+
+## Phase 13 - API hardening, documentation, and manual QA pack details
+
+### How it was implemented
+
+- Added `GET /api/v1/audit-events`, a read-only audit-history route with bounded 1–500 item pagination, optional
+  event/entity/time filters, newest-first ordering, and total/count metadata. Its payload reader redacts
+  credential-like keys and truncates deep, long, or oversized values, so the QA UI cannot use the audit trail to
+  retrieve API keys, signed URLs, or raw provider responses.
+- Added bounded `limit`, `offset`, `count`, and `total` response fields to the demand, normalized-temperature,
+  zone-forecast timeline, and recommendation list routes. Fixed-size map/forecast-set routes remain explicitly
+  unpaginated because the complete configured set is the API contract.
+- Added predictable safe infrastructure and input errors. Missing database configuration now returns
+  `503 database_not_configured`; database failures return `503 database_unavailable`; malformed requests return a
+  safe `422 invalid_request` envelope without echoing submitted values.
+- Added a restrictive comma-separated `CORS_ALLOWED_ORIGINS` setting. The default permits only local frontend
+  origins on ports 3000, allows only `GET`/`POST` with `Content-Type`, does not allow credentials, and does not use
+  wildcard origins.
+- Added OpenAPI tag descriptions for every route group, including the explicit decision-support and replay safety
+  boundaries, making `/docs` easier for frontend developers and QA to navigate.
+- Added `backend/docs/api-contract.md` with public route inventory, representative request/response/error payloads,
+  pagination, CORS, and safety rules. Added `backend/docs/manual-qa.md` with clean setup, full live/replay flows,
+  expected outcomes, negative checks, and defect-recording format.
+- Extended `backend/README.md` with local startup, deployment checklist, troubleshooting, CORS configuration, and
+  reproducible lint/type/compile/startup validation commands. Added Mypy to the development dependencies and a
+  focused Phase 13 static type-check configuration covering the new/changed API boundary modules and schemas.
+
+### Verification performed
+
+- Python compilation and Ruff checks pass across the complete backend and migrations.
+- Mypy passes for the 23 Phase 13 API/config/schema/audit boundary source files configured in `pyproject.toml`.
+- FastAPI OpenAPI generation confirms the audit route, readable tags, safe response schemas, `data_mode`, and list
+  pagination fields are registered.
+- The production-style Uvicorn command successfully starts the application at `127.0.0.1:8013`.
+- Alembic reports `20260829_0009` as the sole migration head. No new database migration is required because Phase
+  13 reads existing audit records and adds no persisted fields.
+
+### Manual QA still required
+
+The full phase QA pack is now in `backend/docs/manual-qa.md`. Docker is not installed on this workstation, so a
+clean PostGIS migration, seeded-database run, and real-provider workflow could not be executed here.
+
+1. On a fresh profile with Docker/PostGIS, follow the clean setup and every live/replay/negative workflow in the
+   manual QA runbook exactly.
+2. Confirm `GET /api/v1/audit-events` paginates and redacts payloads while showing the expected lifecycle events.
+3. Confirm every paginated dashboard timeline exposes coherent `count`, `total`, `limit`, and `offset` values.
+4. Confirm the production frontend’s exact HTTPS origin is the only allowed CORS origin before deployment.
+5. Record defects using the runbook’s endpoint/request/expected/actual/evidence format.
+
+### Final backend status
+
+- The backend MVP is ready for frontend integration and manual QA: its public contract, replay disclosure,
+  development controls, safety boundaries, error shapes, audit reads, and operating guidance are documented.
+- Remaining verification is environmental rather than a missing backend implementation: clean PostGIS migration
+  execution, live EIA/FortyGuard credentials, and a final frontend-origin browser test.
 
 ## Secrets reminder
 

@@ -32,14 +32,18 @@ router = APIRouter()
 def get_recommendations(
     recommendation_status: RecommendationStatus | None = Query(default=None, alias="status"),
     include_inactive: bool = Query(default=False),
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0, le=1_000_000),
     session: Session = Depends(get_db_session),
 ) -> RecommendationListResponse:
     """Return recommendations only; this endpoint never executes or dispatches an action."""
     try:
-        records = list_recommendations(
+        records, total = list_recommendations(
             session=session,
             status=recommendation_status,
             include_inactive=include_inactive,
+            limit=limit,
+            offset=offset,
         )
     except RecommendationError as exc:
         raise _http_error(
@@ -50,6 +54,9 @@ def get_recommendations(
     return RecommendationListResponse(
         data=[_to_data(record) for record in records],
         count=len(records),
+        total=total,
+        limit=limit,
+        offset=offset,
     )
 
 

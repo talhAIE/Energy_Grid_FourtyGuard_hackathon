@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
@@ -101,8 +101,10 @@ def list_demand_observations(
     *,
     start: datetime,
     end: datetime,
+    limit: int = 100,
+    offset: int = 0,
     settings: Settings | None = None,
-) -> list[DemandObservationData]:
+) -> tuple[list[DemandObservationData], int]:
     """Return the configured city's persisted demand observations in chronological order."""
     settings = settings or get_settings()
     start_utc, end_utc = validate_date_range(
@@ -111,7 +113,7 @@ def list_demand_observations(
         max_days=settings.eia_max_import_days,
     )
     city = _get_demo_city(session=session, settings=settings)
-    observations = session.scalars(
+    statement = (
         select(DemandObservation)
         .where(
             DemandObservation.city_id == city.id,
@@ -119,7 +121,9 @@ def list_demand_observations(
             DemandObservation.period_utc <= end_utc,
         )
         .order_by(DemandObservation.period_utc)
-    ).all()
+    )
+    total = session.scalar(select(func.count()).select_from(statement.subquery())) or 0
+    observations = session.scalars(statement.offset(offset).limit(limit)).all()
     return [
         DemandObservationData(
             id=observation.id,
@@ -132,7 +136,7 @@ def list_demand_observations(
             quality_flag=observation.quality_flag,
         )
         for observation in observations
-    ]
+    ], total
 
 
 def _get_demo_city(*, session: Session, settings: Settings) -> City:

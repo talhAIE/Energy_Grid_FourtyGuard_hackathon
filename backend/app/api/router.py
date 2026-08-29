@@ -1,5 +1,6 @@
 from fastapi import APIRouter
 
+from app.api.v1.audit import router as audit_router
 from app.api.v1.cycles import demo_router
 from app.api.v1.cycles import router as cycles_router
 from app.api.v1.data import router as data_router
@@ -14,6 +15,7 @@ from app.api.v1.zones import router as zones_router
 
 api_router = APIRouter()
 api_router.include_router(health_router, tags=["health"])
+api_router.include_router(audit_router, prefix="/audit-events", tags=["audit"])
 api_router.include_router(data_router, prefix="/data", tags=["demand data"])
 api_router.include_router(cycles_router, prefix="/cycles", tags=["pipeline cycles"])
 api_router.include_router(demo_router, prefix="/demo", tags=["demo"])

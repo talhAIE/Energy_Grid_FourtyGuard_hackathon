@@ -8,6 +8,10 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.core.config import get_settings
 
 
+class DatabaseNotConfiguredError(RuntimeError):
+    """Raised when a database-backed route is called before a database is configured."""
+
+
 @lru_cache
 def get_engine() -> Engine | None:
     """Create the PostgreSQL engine only when a database URL is configured."""
@@ -22,7 +26,7 @@ def get_session_factory() -> sessionmaker[Session]:
     """Return the application database session factory."""
     engine = get_engine()
     if engine is None:
-        raise RuntimeError("DATABASE_URL is not configured.")
+        raise DatabaseNotConfiguredError("DATABASE_URL is not configured.")
     return sessionmaker(bind=engine, autocommit=False, autoflush=False)
 
 
@@ -47,4 +51,3 @@ def get_database_health() -> str:
     except SQLAlchemyError:
         return "unavailable"
     return "healthy"
-

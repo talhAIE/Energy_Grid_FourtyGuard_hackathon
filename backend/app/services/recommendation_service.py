@@ -6,7 +6,7 @@ from decimal import Decimal
 from typing import Literal
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
@@ -224,7 +224,9 @@ def list_recommendations(
     *,
     status: str | None = None,
     include_inactive: bool = False,
-) -> list[RecommendationRecord]:
+    limit: int = 100,
+    offset: int = 0,
+) -> tuple[list[RecommendationRecord], int]:
     """List stored recommendations after safely expiring any pending item past its deadline."""
     if status is not None and status not in {
         ACTIVE_RECOMMENDATION_STATUS,
@@ -240,10 +242,16 @@ def list_recommendations(
         statement = statement.where(Recommendation.status == status)
     elif not include_inactive:
         statement = statement.where(Recommendation.status == ACTIVE_RECOMMENDATION_STATUS)
+    total = session.scalar(select(func.count()).select_from(statement.subquery())) or 0
     rows = session.execute(
         statement.order_by(Recommendation.expires_at, Recommendation.created_at.desc())
+        .offset(offset)
+        .limit(limit)
     ).all()
-    return [RecommendationRecord(recommendation=item[0], zone_forecast=item[1]) for item in rows]
+    records = [
+        RecommendationRecord(recommendation=item[0], zone_forecast=item[1]) for item in rows
+    ]
+    return records, total
 
 
 def record_recommendation_decision(

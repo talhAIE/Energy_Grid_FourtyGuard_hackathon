@@ -44,3 +44,6 @@ class EiaImportResponse(DataModeResponse):
 class DemandObservationListResponse(DataModeResponse):
     data: list[DemandObservationData]
     count: int
+    total: int
+    limit: int = Field(ge=1, le=500)
+    offset: int = Field(ge=0)

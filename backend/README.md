@@ -562,3 +562,67 @@ audit-history read API.
 No completed real-provider capture is stored in this repository, so the committed fixture is candidly labeled a
 scrubbed deterministic demonstration dataset. Before claiming production provenance, replace its numeric values
 with an approved scrub of completed FortyGuard/EIA results while retaining the no-secret/no-signed-URL constraint.
+
+## Phase 13 frontend handoff and operations
+
+The API contract and end-to-end QA instructions are maintained separately so a frontend developer or tester can
+work without reading source code:
+
+- [API contract](docs/api-contract.md): route inventory, request/response examples, pagination, errors, CORS, and
+  safety boundaries.
+- [Manual QA runbook](docs/manual-qa.md): clean setup plus live and no-key replay workflows.
+
+### Local startup
+
+From `backend/`, use Python 3.12 and a private virtual environment:
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -e ".[dev]"
+Copy-Item .env.example .env
+docker compose up --build -d
+docker compose exec api alembic upgrade head
+docker compose exec api python -m app.scripts.seed_city
+docker compose exec api python -m app.scripts.seed_zones
+python -m uvicorn app.main:app --reload
+```
+
+Visit `http://127.0.0.1:8000/docs` and start with `GET /api/v1/health`. The Docker API service is also available on
+port 8000; use either it or the local reload process, not both at once.
+
+### Deployment checklist
+
+1. Set a production `APP_ENV`, a production `DATABASE_URL`, exact HTTPS `CORS_ALLOWED_ORIGINS`, and the required
+   provider keys through the deployment secret manager—not Git or a request body.
+2. Run `alembic upgrade head` against the target PostGIS database before routing traffic to the new API version.
+3. Start with `python -m uvicorn app.main:app --host 0.0.0.0 --port 8000` (or the equivalent managed-process
+   command), then probe `/api/v1/health`.
+4. Keep `REPLAY_MODE=false` in production unless an explicitly approved, clearly disclosed demo deployment is
+   intended. Manual/demo controls are limited to development/test environments.
+5. Verify the frontend origin receives the expected CORS header and run the relevant section of the QA runbook.
+
+### Troubleshooting
+
+| Symptom | Check |
+| --- | --- |
+| `503 database_not_configured` | Set a valid local `DATABASE_URL`, then restart the API. |
+| Health reports database `unavailable` | Start PostGIS, verify the database credentials locally, and rerun `alembic upgrade head`. |
+| `503 eia_not_configured` or `fortyguard_not_configured` | Add the relevant key only to ignored `.env`, restart, and never include it in an API request. |
+| Replay loader returns `409 replay_mode_disabled` | Set `APP_ENV=development` and `REPLAY_MODE=true`, restart, then migrate the database. |
+| Browser request is blocked by CORS | Add the frontend’s exact scheme/host/port to `CORS_ALLOWED_ORIGINS`; do not use `*`. |
+| No active model/forecast data | Follow the Phase 7/8 dataset and training steps, then ensure future temperature and demand inputs are complete. |
+| Provider job stays pending | Use bounded `POST /jobs/{job_id}/poll` or cycle advance calls; do not wait in one request. |
+
+### Phase 13 validation commands
+
+```powershell
+python -m ruff check .
+python -m mypy
+python -m compileall -q app alembic
+alembic heads
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
+
+The full migration-on-empty-PostGIS and fresh-profile checks are documented in `docs/manual-qa.md` because they
+need Docker/PostGIS on the target machine.

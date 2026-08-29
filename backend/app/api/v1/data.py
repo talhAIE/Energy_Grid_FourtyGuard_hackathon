@@ -66,11 +66,19 @@ def post_eia_import(
 def get_demand(
     start: datetime = Query(description="Inclusive ISO-8601 start time. UTC is recommended."),
     end: datetime = Query(description="Inclusive ISO-8601 end time. UTC is recommended."),
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0, le=1_000_000),
     session: Session = Depends(get_db_session),
 ) -> DemandObservationListResponse:
     """Read bounded persisted demand data; this route never contacts EIA."""
     try:
-        observations = list_demand_observations(session=session, start=start, end=end)
+        observations, total = list_demand_observations(
+            session=session,
+            start=start,
+            end=end,
+            limit=limit,
+            offset=offset,
+        )
     except EiaValidationError as exc:
         raise _http_error(
             status.HTTP_422_UNPROCESSABLE_ENTITY, "invalid_date_range", str(exc)
@@ -79,7 +87,13 @@ def get_demand(
         raise _http_error(
             status.HTTP_503_SERVICE_UNAVAILABLE, "demand_data_not_ready", str(exc)
         ) from exc
-    return DemandObservationListResponse(data=observations, count=len(observations))
+    return DemandObservationListResponse(
+        data=observations,
+        count=len(observations),
+        total=total,
+        limit=limit,
+        offset=offset,
+    )
 
 
 def _http_error(status_code: int, code: str, message: str) -> HTTPException:

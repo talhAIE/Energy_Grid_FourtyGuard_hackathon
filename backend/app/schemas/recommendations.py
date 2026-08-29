@@ -54,6 +54,9 @@ class RecommendationData(BaseModel):
 class RecommendationListResponse(DataModeResponse):
     data: list[RecommendationData]
     count: int
+    total: int
+    limit: int = Field(ge=1, le=500)
+    offset: int = Field(ge=0)
 
 
 class RecommendationDecisionRequest(BaseModel):
