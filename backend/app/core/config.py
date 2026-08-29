@@ -95,6 +95,12 @@ class Settings(BaseSettings):
         le=720,
         validation_alias="RECOMMENDATION_EXPIRY_MINUTES",
     )
+    pipeline_max_poll_attempts: int = Field(
+        default=120,
+        ge=1,
+        le=1_000,
+        validation_alias="PIPELINE_MAX_POLL_ATTEMPTS",
+    )
     eia_base_url: str = Field(default="https://api.eia.gov/v2", validation_alias="EIA_BASE_URL")
     eia_api_key: str | None = Field(default=None, validation_alias="EIA_API_KEY")
     eia_demand_route: str = Field(
@@ -155,6 +161,12 @@ class Settings(BaseSettings):
         ge=4_096,
         le=1_048_576,
         validation_alias="FORTYGUARD_MAX_RAW_RESPONSE_BYTES",
+    )
+    fortyguard_daily_submission_limit: int = Field(
+        default=24,
+        ge=0,
+        le=10_000,
+        validation_alias="FORTYGUARD_DAILY_SUBMISSION_LIMIT",
     )
 
     @field_validator("database_url", mode="before")

@@ -3,7 +3,7 @@
 from datetime import UTC, date, datetime, time, timedelta
 
 from geoalchemy2.shape import from_shape, to_shape
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
@@ -40,6 +40,10 @@ class HeatmapNotReadyError(Exception):
 
 class HeatmapDuplicateError(Exception):
     """Raised when a previous failed submission has already reserved the same input hash."""
+
+
+class HeatmapBudgetExceededError(Exception):
+    """Raised before a new provider task when the conservative submission budget is used."""
 
 
 def submit_heatmap(
@@ -85,6 +89,8 @@ def submit_heatmap(
             "This heatmap input already has a previous failed submission and will not be resent "
             "automatically. Change the input or inspect the audit history."
         )
+
+    _enforce_daily_submission_limit(session=session, city=city, settings=settings)
 
     provider_client = client or FortyGuardClient(settings)
     requested_at = datetime.now(UTC)
@@ -219,6 +225,40 @@ def _record_validation_failure(*, session: Session, city: City, reason: str) -> 
         payload={"provider": FORTYGUARD_PROVIDER, "operation": HEATMAP_OPERATION, "reason": reason},
     )
     session.commit()
+
+
+def _enforce_daily_submission_limit(*, session: Session, city: City, settings: Settings) -> None:
+    """Apply a local, conservative task-count guard before a new potentially billed submission."""
+    if settings.fortyguard_daily_submission_limit == 0:
+        return
+    cutoff = datetime.now(UTC) - timedelta(days=1)
+    accepted_task_count = session.scalar(
+        select(func.count(IntegrationJob.id)).where(
+            IntegrationJob.provider == FORTYGUARD_PROVIDER,
+            IntegrationJob.operation == HEATMAP_OPERATION,
+            IntegrationJob.requested_at >= cutoff,
+            IntegrationJob.status.in_({"submitted", "processing", "completed", "timed_out"}),
+        )
+    )
+    if (
+        accepted_task_count is not None
+        and accepted_task_count >= settings.fortyguard_daily_submission_limit
+    ):
+        record_audit_event(
+            session,
+            event_type="heatmap.submission_budget_blocked",
+            entity_type="city",
+            entity_id=city.id,
+            payload={
+                "daily_submission_limit": settings.fortyguard_daily_submission_limit,
+                "accepted_task_count": accepted_task_count,
+            },
+        )
+        session.commit()
+        raise HeatmapBudgetExceededError(
+            "The configured FortyGuard daily submission limit has been reached. "
+            "Reuse an existing task or adjust local budget configuration."
+        )
 
 
 def _mark_submission_failed(

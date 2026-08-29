@@ -34,7 +34,8 @@ This file tracks completed work and how it was implemented. Update it at the end
 | 8 - Baseline demand model | Implemented; manual model/database QA pending | Chronological OLS training, stored metrics/model versions, JSON artifact, validation export, and safeguarded city forecast API |
 | 9 - Zone risk forecast | Implemented; manual model/database QA pending | Heat-adjusted proxy zone allocation, persisted explainable risk scores, confidence/freshness signals, and zone forecast APIs |
 | 10 - Recommendations and approvals | Implemented; manual model/database QA pending | Guarded recommendations, bounded action catalogue, immutable human decisions, expiry/supersession, and audit trail |
-| 11-13 | Not started | Scheduler, replay mode, and QA pack |
+| 11 - Pipeline and safeguards | Implemented; manual live-provider/database QA pending | Durable manually advanced pipeline cycles, one-shot orchestration, idempotency, freshness state, poll limits, and soft submission budget |
+| 12-13 | Not started | Replay mode and QA pack |
 
 ## Phase 0 - Foundation details
 
@@ -606,8 +607,71 @@ active baseline-model prerequisites. Do not paste API keys into chat or commit `
 
 ### Known boundary for the next phase
 
-- Phase 10 provides human-supervised recommendation records only. It does not schedule provider calls, run an
-  automated cycle, send notifications, or control equipment. Phase 11 adds safe manual/scheduled orchestration.
+- Resolved in Phase 11: a manually advanced, durable pipeline can now coordinate heatmap submission, one-shot
+  polling, normalization, forecast, risk, and recommendations. It remains development/test controlled and has no
+  autonomous scheduler or notification/control integration.
+
+## Phase 11 - Scheduled pipeline and operational safeguards details
+
+### How it was implemented
+
+- Added `pipeline_cycles` and Alembic migration `20260829_0009`. Each durable cycle is uniquely linked to one
+  FortyGuard integration job and records trigger source, forecast time, progress/error state, last advance,
+  completion, downstream counts, and `fresh`/`stale`/`unavailable` data freshness.
+- Added development/test-only `POST /api/v1/cycles/run`, `POST /api/v1/cycles/{id}/advance`, and
+  `GET /api/v1/cycles/{id}`. Added `POST /api/v1/demo/run-cycle` as the same locally protected demo trigger;
+  Phase 12 will add its replay fixture behavior.
+- Every cycle advance performs no more than one FortyGuard poll. If the job is still pending it stores
+  `submitted`/`processing` state and returns. When the job completes with successful normalization, the cycle
+  invokes the existing city forecast, zone-risk, and guarded recommendation services; no duplicate model/risk or
+  recommendation logic was reimplemented.
+- Reusing an equivalent heatmap request reuses its request-hashed integration job and its unique cycle. The
+  existing unique zone-forecast, recommendation, and decision rules preserve idempotency through downstream
+  stages, so overlapping manual requests do not produce duplicate paid jobs or active recommendations.
+- Added failure/guardrail paths: terminal provider failures/timeouts mark the cycle `failed`; normalization or
+  forecast-data readiness failures mark it `blocked`; each produces a safe audit event and retained error code.
+  A `PIPELINE_MAX_POLL_ATTEMPTS` limit marks a still-running job/cycle failed rather than polling indefinitely.
+- Added a configurable, conservative 24-hour `FORTYGUARD_DAILY_SUBMISSION_LIMIT` soft budget. It is checked only
+  after a duplicate request is recognized and before a new provider submission; a budget block returns a safe
+  `429`, records an audit event, and exposes no credentials or provider payload.
+- Cycle status includes a data-freshness field. A completed cycle is `fresh` only when every persisted zone
+  forecast is fresh; otherwise it is `stale`. Before downstream forecasts exist it remains `unavailable`.
+
+### Verification performed
+
+- Python compilation and Ruff checks pass for the full backend, including the new cycle models, routes,
+  orchestration service, budget guard, and migration.
+- FastAPI OpenAPI validation confirms the manual cycle, cycle-status, cycle-advance, and demo-run routes are
+  registered without replacing existing heatmap/job/forecast routes.
+- SQLAlchemy metadata validation confirms `pipeline_cycles` is registered, and Alembic reports
+  `20260829_0009` as the migration head.
+
+### Manual QA still required
+
+This requires the completed Phase 1, 3, 6, 8, 9, and 10 database/provider setup, including a valid local
+FortyGuard key and a future heatmap request with complete zone coverage. Keep keys only in ignored `backend/.env`.
+
+1. Run `alembic upgrade head`, then call `POST /api/v1/cycles/run` with the valid Phase 4 heatmap body nested as
+   `{ "heatmap": { ... } }`. Confirm it returns promptly with a durable cycle and no long-running poll.
+2. Use `GET /api/v1/cycles/{id}` between `POST /api/v1/cycles/{id}/advance` calls. Confirm poll attempts, job
+   provider status, cycle status, and error code persist through an API restart.
+3. Run the exact same cycle request again while the first is active. Confirm `reused: true`, the same job/cycle
+   IDs, and no second FortyGuard submission/audit event.
+4. After provider completion, confirm the cycle progresses to `completed`, runs forecast/risk/recommendation once,
+   and shows accurate zone/recommendation counts and freshness state. Compare with the ordinary forecast and
+   recommendation endpoints.
+5. Use a provider failure, timeout, incomplete normalized data, or missing model input in controlled local QA.
+   Confirm the cycle becomes `failed` or `blocked`, preserves a safe error code, and writes a pipeline audit event.
+6. Temporarily lower `PIPELINE_MAX_POLL_ATTEMPTS` and advance a still-processing job. Confirm it stops with
+   `pipeline_poll_attempt_limit_exceeded`; restore the setting afterward.
+7. Temporarily set a small `FORTYGUARD_DAILY_SUBMISSION_LIMIT`, submit enough distinct small AOIs to reach it, and
+   confirm the next new request returns `429 heatmap_submission_budget_exceeded`. Reuse a prior request to confirm
+   idempotent reuse still succeeds; restore the local budget afterward.
+
+### Known boundary for the next phase
+
+- Phase 11 intentionally has no always-on scheduler, external scheduler authentication, replay fixtures, or
+  notifications. Phase 12 adds a scrubbed offline replay scenario using the same application services.
 
 ## Secrets reminder
 

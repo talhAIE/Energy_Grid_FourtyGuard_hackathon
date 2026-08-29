@@ -9,6 +9,7 @@ from app.services.fortyguard_client import (
     FortyGuardResponseError,
 )
 from app.services.heatmap_submission_service import (
+    HeatmapBudgetExceededError,
     HeatmapDuplicateError,
     HeatmapNotReadyError,
     HeatmapValidationError,
@@ -52,6 +53,12 @@ def post_heatmap_submit(
     except HeatmapDuplicateError as exc:
         raise _http_error(
             status.HTTP_409_CONFLICT, "heatmap_submission_not_repeatable", str(exc)
+        ) from exc
+    except HeatmapBudgetExceededError as exc:
+        raise _http_error(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            "heatmap_submission_budget_exceeded",
+            str(exc),
         ) from exc
     return HeatmapSubmitResponse(data=job)
 

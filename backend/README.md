@@ -456,3 +456,66 @@ proposed action.
 5. Use a stale or low-confidence zone forecast. Confirm `recommendations_created_count` is zero for that zone,
    `recommendation_eligibility` exposes `stale_temperature_data` or `insufficient_confidence`, and no pending
    recommendation appears in the list.
+
+## Phase 11 manually advanced pipeline and safeguards
+
+Phase 11 adds durable orchestration without an always-on worker. A manual cycle submits or reuses one heatmap
+task, performs **at most one** provider status poll, persists the result, and returns promptly. Repeating the
+same request or calling the cycle advance endpoint later resumes from stored state; it does not submit another
+equivalent FortyGuard task.
+
+Development/test-only controls:
+
+- `POST /api/v1/cycles/run` starts or resumes a manual cycle.
+- `POST /api/v1/cycles/{cycle_id}/advance` makes the next bounded advance/poll.
+- `GET /api/v1/cycles/{cycle_id}` reads persisted cycle/job state without contacting FortyGuard.
+- `POST /api/v1/demo/run-cycle` uses the same protected path for local demo work. Replay fixtures are added in
+  Phase 12, so this currently uses the supplied live heatmap request.
+
+Each start request has this shape:
+
+```json
+{
+  "heatmap": {
+    "polygon_aoi": { "type": "FeatureCollection", "features": [] },
+    "date_time": { "start_date": "2026-08-29", "start_time": "12:00", "filter_type": 1 },
+    "granularity": 80,
+    "analytic_type": "tcm"
+  }
+}
+```
+
+Use a valid Houston AOI as shown in the Phase 4 example; the shortened empty FeatureCollection above is only the
+request envelope. Once the provider job completes and Phase 6 normalization succeeds, the same cycle runs the
+city forecast, zone proxy-risk allocation, and guarded recommendations. A cycle exposes `data_freshness_status`
+as `fresh`, `stale`, or `unavailable`, so dashboards can avoid acting on stale outputs.
+
+Operational safeguards:
+
+- `PIPELINE_MAX_POLL_ATTEMPTS=120` stops a cycle from issuing unlimited status polls.
+- Provider failures, timeouts, normalization failures, and unavailable forecast inputs become persisted cycle
+  `failed` or `blocked` states with audit events.
+- `FORTYGUARD_DAILY_SUBMISSION_LIMIT=24` is a conservative local task-count budget before a new potentially
+  billed submission. Set it to `0` only when intentionally disabling the guard in local configuration.
+- Database uniqueness links one cycle to one integration job; the existing request hash plus zone/recommendation
+  uniqueness rules prevent duplicate jobs, forecasts, or active recommendations when requests overlap.
+
+1. Apply the migration:
+
+   ```powershell
+   alembic upgrade head
+   ```
+
+2. In development, call `POST /api/v1/cycles/run` with the valid Phase 4 heatmap body nested under `heatmap`.
+   Save the returned cycle ID. The first response should be `submitted` or `processing` and return immediately.
+
+3. Call `POST /api/v1/cycles/{cycle_id}/advance` about every five seconds. Use
+   `GET /api/v1/cycles/{cycle_id}` between calls to inspect state without another provider request.
+
+4. On successful completion, confirm `status: "completed"`, a positive `zone_forecast_count`, the intended
+   `recommendation_count`, and visible `data_freshness_status`. Confirm the normal forecast/recommendation APIs
+   contain the same downstream results.
+
+5. Trigger the exact same cycle body while the original is active. Confirm the existing job/cycle is reused and
+   the provider does not receive a second submission. Lower the local poll-attempt or daily-submission limit only
+   for controlled QA to confirm the safe `failed`/budget-blocked outcomes.

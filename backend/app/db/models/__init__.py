@@ -6,6 +6,7 @@ from app.db.models.demand_observation import DemandObservation
 from app.db.models.heatmap_run import HeatmapRun
 from app.db.models.integration_job import IntegrationJob
 from app.db.models.model_version import ModelVersion
+from app.db.models.pipeline_cycle import PipelineCycle
 from app.db.models.recommendation import Recommendation
 from app.db.models.recommendation_decision import RecommendationDecision
 from app.db.models.zone import Zone
@@ -19,6 +20,7 @@ __all__ = [
     "HeatmapRun",
     "IntegrationJob",
     "ModelVersion",
+    "PipelineCycle",
     "Recommendation",
     "RecommendationDecision",
     "Zone",
