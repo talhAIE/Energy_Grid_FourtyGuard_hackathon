@@ -48,6 +48,8 @@ class ForecastRunData(BaseModel):
     feature_quality_status: Literal["complete"] = "complete"
     lag_demand_1h_mw: Decimal
     lag_demand_24h_mw: Decimal
+    zone_forecast_count: int
+    zone_forecasts_reused: bool
 
 
 class ForecastRunResponse(BaseModel):

@@ -49,6 +49,36 @@ class Settings(BaseSettings):
         le=100_000,
         validation_alias="MODEL_MIN_TRAINING_ROWS",
     )
+    zone_risk_heat_anomaly_scale_c: Decimal = Field(
+        default=Decimal("5"),
+        gt=0,
+        le=30,
+        validation_alias="ZONE_RISK_HEAT_ANOMALY_SCALE_C",
+    )
+    zone_risk_temperature_ramp_scale_c_per_hour: Decimal = Field(
+        default=Decimal("2"),
+        gt=0,
+        le=20,
+        validation_alias="ZONE_RISK_TEMPERATURE_RAMP_SCALE_C_PER_HOUR",
+    )
+    zone_risk_temperature_stddev_scale_c: Decimal = Field(
+        default=Decimal("5"),
+        gt=0,
+        le=30,
+        validation_alias="ZONE_RISK_TEMPERATURE_STDDEV_SCALE_C",
+    )
+    zone_risk_uplift_scale_percent: Decimal = Field(
+        default=Decimal("25"),
+        gt=0,
+        le=200,
+        validation_alias="ZONE_RISK_UPLIFT_SCALE_PERCENT",
+    )
+    zone_forecast_max_temperature_age_minutes: int = Field(
+        default=120,
+        ge=1,
+        le=1_440,
+        validation_alias="ZONE_FORECAST_MAX_TEMPERATURE_AGE_MINUTES",
+    )
     eia_base_url: str = Field(default="https://api.eia.gov/v2", validation_alias="EIA_BASE_URL")
     eia_api_key: str | None = Field(default=None, validation_alias="EIA_API_KEY")
     eia_demand_route: str = Field(

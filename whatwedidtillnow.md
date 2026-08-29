@@ -32,7 +32,8 @@ This file tracks completed work and how it was implemented. Update it at the end
 | 6 - Heatmap normalization | Implemented; manual live-provider QA pending | Automatic tile parsing, centroid-based zone aggregation, missing-zone markers, and temperature timeline API |
 | 7 - Feature dataset | Implemented; manual dataset QA pending | Versioned CSV/quality report, UTC/local time alignment, Cooling Degree Hours, calendar features, and explicit missing-temperature labels |
 | 8 - Baseline demand model | Implemented; manual model/database QA pending | Chronological OLS training, stored metrics/model versions, JSON artifact, validation export, and safeguarded city forecast API |
-| 9-13 | Not started | Zone risk, recommendations, scheduler, replay mode, and QA pack |
+| 9 - Zone risk forecast | Implemented; manual model/database QA pending | Heat-adjusted proxy zone allocation, persisted explainable risk scores, confidence/freshness signals, and zone forecast APIs |
+| 10-13 | Not started | Recommendations, scheduler, replay mode, and QA pack |
 
 ## Phase 0 - Foundation details
 
@@ -481,9 +482,68 @@ feature rows and future/selected temperature coverage. Do not paste API keys int
 
 ### Known boundary for the next phase
 
-- Phase 8 produces only a city/grid-area demand estimate. Phase 9 will allocate that estimate to zones as an
-  explicitly labeled proxy, calculate deterministic heat/demand risk scores and confidence, and persist zone
-  forecast outputs. It must not claim actual feeder demand.
+- Resolved in Phase 9: city-level estimates are now allocated to zones as explicitly labeled proxy forecasts.
+
+## Phase 9 - Zone demand allocation and risk-scoring details
+
+### How it was implemented
+
+- Added the `zone_forecasts` table and Alembic migration `20260829_0007`. Every record retains the zone,
+  forecast time, baseline-model version, city estimate, zone allocation weight, temperature inputs, baseline and
+  predicted MW, uplift, risk, confidence, freshness status, and a structured explanation object.
+- Updated `POST /api/v1/forecast/run` so that a successful safeguarded city estimate immediately generates one
+  zone forecast for every active zone. The city response remains an `estimate`; every zone value is explicitly
+  marked `estimate_type: "proxy"` because real feeder/zone demand is not available.
+- Zone baseline MW is the city estimate distributed by allocation weight. The proxy allocation adjusts each
+  weight with the zone's temperature anomaly versus the allocation-weighted city temperature, then normalizes
+  all heat-adjusted weights. This keeps the zone-MW total aligned with the city estimate apart from rounding.
+- Added a deterministic, persisted `zone-risk-v1` calculation. It normalizes positive uplift (45%), positive
+  heat anomaly (30%), positive one-hour temperature ramp (15%), and uncertainty (10%), then applies a logistic
+  score mapping. Labels are `low` 0-39, `watch` 40-64, `high` 65-79, and `critical` 80-100.
+- Uncertainty is explicit, never silently filled: spatial temperature variability, a missing exact prior-hour
+  temperature, and stale retrieval time increase the penalty. Stale/uncertain outputs lower confidence. Missing
+  or partial same-time active-zone coverage blocks zone forecasting instead of inventing an allocation.
+- Added `GET /api/v1/forecasts/latest` for the latest all-zone set and
+  `GET /api/v1/forecasts/zones/{zone_id}` for a bounded timeline with its structured evidence.
+- Added configurable but versioned-in-explanation normalization scales for anomaly, ramp, spatial variability,
+  uplift, and maximum source age. The exact values used are retained in every forecast's explanation JSON.
+- Added an append-only `zone_forecasts.generated` audit event for each newly persisted set. Re-running the same
+  active model and forecast time reuses the existing complete set rather than overwriting historical outputs.
+
+### Verification performed
+
+- Python compilation succeeds for the API, migrations, models, and Phase 9 service.
+- The migration follows `20260827_0006_model_versions` and adds foreign keys for both the zone and model version,
+  a uniqueness rule for `zone + model + forecast time`, and indexes for latest-set and per-zone timeline reads.
+- Static inspection confirmed the city forecast route preserves its existing model/artifact/input safeguards
+  before Phase 9 allocation runs, and that the zone endpoints expose no raw provider responses or credentials.
+
+### Manual QA still required
+
+This requires the completed Phase 1, 3, 6, 7, and 8 setup: a migrated PostGIS database, seeded zones, an active
+baseline model, complete future zone temperatures, and actual EIA demand at the required one- and 24-hour lags.
+
+1. Run `alembic upgrade head`, then call `POST /api/v1/forecast/run` for a usable future time.
+2. Confirm its response has a positive `zone_forecast_count`. Call `GET /api/v1/forecasts/latest`; expect one
+   `proxy` record for every active zone, each with a numeric 0-100 risk score and an allowed risk label.
+3. Sum latest `predicted_mw` values and compare with the returned city `predicted_demand_mw`. The difference must
+   be no more than normal three-decimal rounding.
+4. Inspect a hotter and cooler zone. Confirm heat anomaly changes the structured allocation multiplier and the
+   hotter zone's proxy share relative to its baseline allocation.
+5. Query `GET /api/v1/forecasts/zones/{zone_id}` with a known zone ID and a bounded range. Confirm records are
+   chronological, contain the stored model version and explanation, and never claim actual feeder demand.
+6. Remove an exact prior-hour zone temperature only in a controlled local dataset. Confirm forecast still labels
+   the affected zone medium/low confidence with visible uncertainty. Remove same-time coverage instead; confirm
+   `POST /api/v1/forecast/run` rejects the forecast with `forecast_input_not_ready`.
+7. Make one source-retrieval time older than `ZONE_FORECAST_MAX_TEMPERATURE_AGE_MINUTES`. Confirm the generated
+   record is `data_freshness_status: "stale"` and confidence is `low`; restore the source data afterward.
+8. Run the identical forecast again with the same active model. Confirm the zone set is reused and no duplicate
+   `zone_forecasts` records or extra `zone_forecasts.generated` audit event is created.
+
+### Known boundary for the next phase
+
+- Phase 9 provides traceable proxy risk forecasts only. It does not create recommendations, contact operators,
+  or control grid equipment. Phase 10 adds the separately guarded human approval workflow.
 
 ## Secrets reminder
 

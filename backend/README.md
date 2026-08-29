@@ -354,8 +354,52 @@ never fills missing values.
    ```
 
    The route returns `estimate_type: "estimate"`, the explicit model version, validation-safe input details,
-   and predicted demand in MW. It returns a clear error rather than guessing if the model artifact, complete
-   zone temperatures, or 1-hour/24-hour demand lags are unavailable.
+   and predicted demand in MW. It also persists the corresponding Phase 9 zone proxy forecasts. It returns a
+   clear error rather than guessing if the model artifact, complete zone temperatures, or 1-hour/24-hour demand
+   lags are unavailable.
 
 7. Read the [baseline model contract](docs/baseline-model-contract.md) before using the metrics. It documents
    the chronological split, feature eligibility, artifact format, and forecast safety rules.
+
+## Phase 9 zone demand allocation and risk scoring
+
+Phase 9 converts the guarded city-level estimate into one **proxy** estimate per active zone. It never claims
+to measure feeder or zone load. The baseline allocation uses the configured zone allocation weight; the final
+proxy allocation adjusts that share by the zone's heat anomaly relative to the allocation-weighted city
+temperature, then normalizes all zones so their predicted MW total approximately equals the city estimate.
+
+`POST /api/v1/forecast/run` now creates the zone set after a successful city estimate. Its response contains
+`zone_forecast_count` and `zone_forecasts_reused`; an equivalent model/time set is reused rather than changed.
+
+- `GET /api/v1/forecasts/latest` returns the most recently generated set for all zones.
+- `GET /api/v1/forecasts/zones/{zone_id}` returns one zone's stored timeline. Optional `start` and `end` are
+  inclusive ISO-8601 UTC bounds; an omitted range defaults to the recent week plus the next day.
+
+Each stored result includes the temperature, heat anomaly, exact one-hour temperature ramp when available,
+baseline and proxy MW, uplift percentage, risk score/label, confidence, freshness status, allocation weight,
+and structured calculation evidence. Risk is deterministic: normalized demand uplift (45%), heat anomaly
+(30%), rising temperature (15%), and an uncertainty penalty (10%) are passed through a documented logistic
+formula. Scores use `low` (0-39), `watch` (40-64), `high` (65-79), and `critical` (80-100).
+
+1. Apply the new migration after the Phase 8 model is available:
+
+   ```powershell
+   alembic upgrade head
+   ```
+
+2. Ensure a selected future time has complete active-zone temperature coverage and real EIA demand exactly one
+   and 24 hours earlier. Add an exact prior-hour zone temperature when you want the temperature-ramp input.
+
+3. Run the forecast, then call `GET /api/v1/forecasts/latest`. Confirm there is one record per active zone, all
+   results contain `estimate_type: "proxy"`, and `risk_score` is numeric and within 0-100.
+
+4. Sum `predicted_mw` across the latest set. It should equal the city forecast within normal three-decimal
+   rounding. Confirm every record retains its allocation weight and model version.
+
+5. Compare two zones with different temperatures. The hotter-than-city zone should receive a positive heat
+   anomaly and a higher heat-adjusted proxy allocation than its baseline share; the explanation object exposes
+   the multiplier and normalized inputs used to calculate it.
+
+6. Omit the prior-hour temperature for one zone or use a stale source retrieval time. Confirm the result remains
+   explicitly visible with a lower confidence and a larger uncertainty penalty; partial/missing same-time
+   temperature coverage must instead stop forecast creation with a readable error.
