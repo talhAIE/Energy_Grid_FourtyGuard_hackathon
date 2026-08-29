@@ -4,6 +4,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from app.schemas.common import DataModeResponse
 from app.schemas.recommendations import RecommendationEligibilityData
 
 
@@ -33,7 +34,7 @@ class ActiveModelData(BaseModel):
     activated_at: datetime | None
 
 
-class ActiveModelResponse(BaseModel):
+class ActiveModelResponse(DataModeResponse):
     data: ActiveModelData
 
 
@@ -57,5 +58,5 @@ class ForecastRunData(BaseModel):
     recommendation_eligibility: list[RecommendationEligibilityData]
 
 
-class ForecastRunResponse(BaseModel):
+class ForecastRunResponse(DataModeResponse):
     data: ForecastRunData

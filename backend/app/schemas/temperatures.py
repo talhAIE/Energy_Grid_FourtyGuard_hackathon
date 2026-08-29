@@ -4,6 +4,8 @@ from uuid import UUID
 
 from pydantic import BaseModel
 
+from app.schemas.common import DataModeResponse
+
 
 class ZoneTemperatureData(BaseModel):
     """A traceable, normalized zone temperature observation or explicit missing marker."""
@@ -22,6 +24,6 @@ class ZoneTemperatureData(BaseModel):
     source_retrieved_at: datetime
 
 
-class ZoneTemperatureListResponse(BaseModel):
+class ZoneTemperatureListResponse(DataModeResponse):
     data: list[ZoneTemperatureData]
     count: int

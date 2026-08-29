@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.db.database import get_db_session
 from app.schemas.cycles import CycleData, CycleResponse, CycleRunRequest
+from app.schemas.replay import ReplayLoadData, ReplayLoadResponse
 from app.services.fortyguard_client import (
     FortyGuardConfigurationError,
     FortyGuardRequestError,
@@ -24,6 +25,7 @@ from app.services.pipeline_cycle_service import (
     get_cycle,
     start_cycle,
 )
+from app.services.replay_service import ReplayModeError, load_replay, run_replay_cycle
 
 router = APIRouter()
 demo_router = APIRouter()
@@ -83,12 +85,58 @@ def post_cycle_advance(
     summary="Run one development/demo pipeline cycle step",
 )
 def post_demo_run_cycle(
-    payload: CycleRunRequest,
+    payload: CycleRunRequest | None = None,
     session: Session = Depends(get_db_session),
 ) -> CycleResponse:
-    """Use the same safe orchestration path as manual runs; replay fixtures arrive in Phase 12."""
+    """Run the offline fixture when enabled; otherwise use the safe live demo path."""
     _require_development_control()
+    if get_settings().replay_mode:
+        try:
+            replay = run_replay_cycle(session=session)
+        except ReplayModeError as exc:
+            raise _http_error(
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                "replay_unavailable",
+                str(exc),
+            ) from exc
+        return CycleResponse(
+            data=_to_data(
+                CycleProgress(cycle=replay.cycle, job=replay.job, reused=replay.reused)
+            )
+        )
+    if payload is None:
+        raise _http_error(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "heatmap_request_required",
+            "A heatmap request is required unless REPLAY_MODE=true.",
+        )
     return _start_response(session=session, payload=payload, trigger_source="demo")
+
+
+@demo_router.post(
+    "/load-replay",
+    response_model=ReplayLoadResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Load the scrubbed offline Houston replay scenario",
+)
+def post_load_replay(session: Session = Depends(get_db_session)) -> ReplayLoadResponse:
+    """Development/test-only fixture loader with no external network calls."""
+    _require_development_control()
+    try:
+        replay = load_replay(session=session)
+    except ReplayModeError as exc:
+        raise _http_error(status.HTTP_409_CONFLICT, "replay_mode_disabled", str(exc)) from exc
+    return ReplayLoadResponse(
+        data=ReplayLoadData(
+            scenario=replay.scenario,
+            cycle_id=replay.cycle.id,
+            job_id=replay.job.id,
+            zone_forecast_count=replay.zone_forecast_count,
+            recommendations_created_count=replay.recommendation_result.created_count,
+            recommendations_reused_count=replay.recommendation_result.reused_count,
+            reused=replay.reused,
+        )
+    )
 
 
 def _start_response(

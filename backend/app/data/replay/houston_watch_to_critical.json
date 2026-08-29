@@ -1,0 +1,19 @@
+{
+  "fixture_version": "1",
+  "scenario": "houston-watch-to-critical",
+  "source_provenance": "Scrubbed offline demonstration fixture with no credentials, provider headers, signed URLs, or customer data.",
+  "hours": [
+    {"offset": 0, "city_demand_mw": 55200, "city_temperature_c": 31.0, "medical_center_risk": 50},
+    {"offset": 1, "city_demand_mw": 55600, "city_temperature_c": 31.3, "medical_center_risk": 52},
+    {"offset": 2, "city_demand_mw": 56050, "city_temperature_c": 31.7, "medical_center_risk": 55},
+    {"offset": 3, "city_demand_mw": 56550, "city_temperature_c": 32.1, "medical_center_risk": 58},
+    {"offset": 4, "city_demand_mw": 57100, "city_temperature_c": 32.6, "medical_center_risk": 62},
+    {"offset": 5, "city_demand_mw": 57750, "city_temperature_c": 33.1, "medical_center_risk": 67},
+    {"offset": 6, "city_demand_mw": 58400, "city_temperature_c": 33.6, "medical_center_risk": 71},
+    {"offset": 7, "city_demand_mw": 59100, "city_temperature_c": 34.1, "medical_center_risk": 75},
+    {"offset": 8, "city_demand_mw": 59800, "city_temperature_c": 34.6, "medical_center_risk": 79},
+    {"offset": 9, "city_demand_mw": 60600, "city_temperature_c": 35.1, "medical_center_risk": 83},
+    {"offset": 10, "city_demand_mw": 61400, "city_temperature_c": 35.5, "medical_center_risk": 87},
+    {"offset": 11, "city_demand_mw": 62200, "city_temperature_c": 36.0, "medical_center_risk": 91}
+  ]
+}

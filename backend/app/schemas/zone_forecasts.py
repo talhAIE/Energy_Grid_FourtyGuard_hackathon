@@ -5,6 +5,8 @@ from uuid import UUID
 
 from pydantic import BaseModel
 
+from app.schemas.common import DataModeResponse
+
 
 class ZoneForecastData(BaseModel):
     """One zone-level proxy demand allocation and explainable risk result."""
@@ -42,10 +44,10 @@ class ZoneForecastSetData(BaseModel):
     forecasts: list[ZoneForecastData]
 
 
-class ZoneForecastSetResponse(BaseModel):
+class ZoneForecastSetResponse(DataModeResponse):
     data: ZoneForecastSetData
 
 
-class ZoneForecastTimelineResponse(BaseModel):
+class ZoneForecastTimelineResponse(DataModeResponse):
     data: list[ZoneForecastData]
     count: int

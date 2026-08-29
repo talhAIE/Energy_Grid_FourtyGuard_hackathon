@@ -4,6 +4,7 @@ from uuid import UUID
 
 from pydantic import BaseModel
 
+from app.schemas.common import DataModeResponse
 from app.schemas.heatmaps import HeatmapSubmitRequest
 
 
@@ -33,5 +34,5 @@ class CycleData(BaseModel):
     reused: bool
 
 
-class CycleResponse(BaseModel):
+class CycleResponse(DataModeResponse):
     data: CycleData

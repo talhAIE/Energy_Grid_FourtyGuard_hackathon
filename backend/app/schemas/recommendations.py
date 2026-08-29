@@ -5,6 +5,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.schemas.common import DataModeResponse
+
 RecommendationActionCode = Literal[
     "monitor_and_recheck",
     "verify_reserve_and_prepare_voluntary_demand_response",
@@ -49,7 +51,7 @@ class RecommendationData(BaseModel):
     decided_at: datetime | None
 
 
-class RecommendationListResponse(BaseModel):
+class RecommendationListResponse(DataModeResponse):
     data: list[RecommendationData]
     count: int
 
@@ -84,7 +86,7 @@ class RecommendationDecisionData(BaseModel):
     decided_at: datetime
 
 
-class RecommendationDecisionResponse(BaseModel):
+class RecommendationDecisionResponse(DataModeResponse):
     data: RecommendationDecisionData
 
 

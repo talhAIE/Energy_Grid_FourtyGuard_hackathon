@@ -4,6 +4,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.schemas.common import DataModeResponse
+
 
 class ZoneCreate(BaseModel):
     """Development request to create an operational zone in the configured city."""
@@ -32,9 +34,9 @@ class ZoneData(BaseModel):
     allocation_weight: Decimal
 
 
-class ZoneResponse(BaseModel):
+class ZoneResponse(DataModeResponse):
     data: ZoneData
 
 
-class ZoneListResponse(BaseModel):
+class ZoneListResponse(DataModeResponse):
     data: list[ZoneData]

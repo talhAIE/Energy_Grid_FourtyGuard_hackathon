@@ -4,6 +4,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, model_validator
 
+from app.schemas.common import DataModeResponse
+
 
 class HeatmapDateTime(BaseModel):
     """FortyGuard heatmap date filters, interpreted as UTC by this backend."""
@@ -83,5 +85,5 @@ class HeatmapJobData(BaseModel):
     reused: bool
 
 
-class HeatmapSubmitResponse(BaseModel):
+class HeatmapSubmitResponse(DataModeResponse):
     data: HeatmapJobData

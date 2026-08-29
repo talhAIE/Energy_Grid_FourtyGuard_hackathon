@@ -519,3 +519,46 @@ Operational safeguards:
 5. Trigger the exact same cycle body while the original is active. Confirm the existing job/cycle is reused and
    the provider does not receive a second submission. Lower the local poll-attempt or daily-submission limit only
    for controlled QA to confirm the safe `failed`/budget-blocked outcomes.
+
+## Phase 12 offline replay mode
+
+Phase 12 provides a deterministic, no-network Houston demonstration for development and test environments. The
+fixture at `app/data/replay/houston_watch_to_critical.json` contains no API keys, authorization headers, signed
+URLs, customer data, or raw provider response. It deliberately moves the Medical Center zone from `watch` to
+`high` and then `critical` over twelve hourly forecast slots.
+
+Set the following only in ignored local `backend/.env`:
+
+```dotenv
+APP_ENV=development
+REPLAY_MODE=true
+EIA_API_KEY=
+FORTYGUARD_API_KEY=
+```
+
+Then apply migrations and load the scenario:
+
+```powershell
+alembic upgrade head
+Invoke-RestMethod -Method Post http://127.0.0.1:8000/api/v1/demo/load-replay
+```
+
+The loader writes ordinary city, zone, demand, heatmap-run, temperature, zone-forecast, recommendation, and
+pipeline-cycle records. It does not instantiate either external client. Repeating the request safely reuses
+records for the current replay slots where the existing uniqueness rules permit it.
+
+- `POST /api/v1/demo/load-replay` creates/reuses the complete twelve-hour fixture and returns its final cycle/job.
+- `POST /api/v1/demo/run-cycle` has no body in replay mode and loads/reuses the same offline cycle.
+- Both routes are limited to `development` and `test`; `/demo/load-replay` returns `409` until
+  `REPLAY_MODE=true` is set.
+- Dashboard-facing responses include `data_mode: "replay"` when replay is enabled and `data_mode: "live"`
+  otherwise, including health, zones, demand, temperatures, forecasts, recommendations, jobs, heatmaps, and cycles.
+
+After loading, use `GET /api/v1/zones`, `GET /api/v1/data/demand`, `GET /api/v1/forecasts/latest`,
+`GET /api/v1/recommendations`, and `GET /api/v1/cycles/{cycle_id}` with the returned ID. Each should return
+coherent replay records and `data_mode: "replay"`. Replay audit events are persisted; Phase 13 adds the dedicated
+audit-history read API.
+
+No completed real-provider capture is stored in this repository, so the committed fixture is candidly labeled a
+scrubbed deterministic demonstration dataset. Before claiming production provenance, replace its numeric values
+with an approved scrub of completed FortyGuard/EIA results while retaining the no-secret/no-signed-URL constraint.

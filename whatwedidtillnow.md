@@ -35,7 +35,8 @@ This file tracks completed work and how it was implemented. Update it at the end
 | 9 - Zone risk forecast | Implemented; manual model/database QA pending | Heat-adjusted proxy zone allocation, persisted explainable risk scores, confidence/freshness signals, and zone forecast APIs |
 | 10 - Recommendations and approvals | Implemented; manual model/database QA pending | Guarded recommendations, bounded action catalogue, immutable human decisions, expiry/supersession, and audit trail |
 | 11 - Pipeline and safeguards | Implemented; manual live-provider/database QA pending | Durable manually advanced pipeline cycles, one-shot orchestration, idempotency, freshness state, poll limits, and soft submission budget |
-| 12-13 | Not started | Replay mode and QA pack |
+| 12 - Replay mode and demo reliability | Implemented; manual database QA pending | Offline 12-hour Houston scenario, protected replay endpoints, persisted standard records, and visible `data_mode` API disclosure |
+| 13 - API hardening and QA pack | Not started | API contract, runbook, CORS, and full final QA documentation |
 
 ## Phase 0 - Foundation details
 
@@ -670,8 +671,76 @@ FortyGuard key and a future heatmap request with complete zone coverage. Keep ke
 
 ### Known boundary for the next phase
 
-- Phase 11 intentionally has no always-on scheduler, external scheduler authentication, replay fixtures, or
-  notifications. Phase 12 adds a scrubbed offline replay scenario using the same application services.
+- Resolved in Phase 12: development/test environments can load a visible, no-network offline replay scenario.
+  Phase 13 will add the dedicated audit-history read route, API contract, runbook, CORS review, and complete QA
+  pack.
+
+## Phase 12 - Replay mode and demo reliability details
+
+### How it was implemented
+
+- Added the version-controlled 12-hour fixture
+  `backend/app/data/replay/houston_watch_to_critical.json`. It is intentionally scrubbed and contains only
+  representative scenario values—no credentials, provider headers, signed URLs, customer data, or raw external
+  response. The fixture moves Medical Center from `watch` through `high` to `critical` while city demand and heat
+  increase.
+- Added `app/services/replay_service.py`, which has no EIA or FortyGuard client dependency. With
+  `REPLAY_MODE=true`, it uses the existing city/zone models and seeded geometry to create/reuse normal demand
+  observations, integration jobs, heatmap runs, zone temperatures, proxy zone forecasts, guarded
+  recommendations, completed pipeline cycles, and audit events. This lets the ordinary dashboard-facing read
+  routes present the scenario from the database without external calls.
+- Added the development/test-only `POST /api/v1/demo/load-replay` endpoint. It returns the scenario, final
+  cycle/job IDs, zone-forecast count, recommendation counts, reuse state, and replay disclosure. It returns a
+  safe `409 replay_mode_disabled` response until `REPLAY_MODE=true` is configured.
+- Updated `POST /api/v1/demo/run-cycle`: when replay is enabled it needs no request body and executes the same
+  no-network replay loader; otherwise it keeps the prior protected live heatmap-request behavior.
+- Added the shared `DataModeResponse` envelope and made health, zones, demand, temperatures, city/zone forecasts,
+  recommendations, heatmaps, jobs, and cycles return `data_mode: "live" | "replay"`. Existing endpoint data
+  shapes remain nested under their `data` field.
+- Replay uses standard persisted schemas and the existing recommendation service where practical. Fixture-backed
+  zone forecasts remain deterministic so the system does not pretend to retrain a model or call a live provider.
+  The loader writes `replay.loaded` and `replay.cycle_run` audit events; Phase 13 will provide the dedicated
+  audit-history read API.
+
+### Verification performed
+
+- Python compilation and Ruff checks pass across the backend application and migrations after adding replay
+  routes, schemas, fixture loader, and API envelopes.
+- Fixture-contract verification confirms exactly twelve hourly records and a Medical Center risk transition from
+  `50` (`watch`) to `91` (`critical`).
+- FastAPI OpenAPI generation confirms both `/api/v1/demo/load-replay` and `/api/v1/demo/run-cycle` are registered,
+  and response-schema inspection confirms the public `data_mode` field is exposed.
+- No schema migration was required: replay writes through existing Phase 1-11 tables and preserves
+  `20260829_0009` as the migration head.
+
+### Manual QA still required
+
+This requires a migrated local PostGIS database. Do not add keys to demonstrate replay; leave both external keys
+blank in ignored `backend/.env`.
+
+1. Set `APP_ENV=development` and `REPLAY_MODE=true`, leave `EIA_API_KEY` and `FORTYGUARD_API_KEY` empty, then run
+   `alembic upgrade head` and start the API.
+2. Call `POST /api/v1/demo/load-replay` with no body. Expect `201`, `data_mode: "replay"`, a scenario name, a
+   completed cycle/job, 96 zone forecasts (8 zones × 12 hours), and no external API requirement.
+3. Call `GET /api/v1/health`, `/api/v1/zones`, `/api/v1/data/demand`, `/api/v1/forecasts/latest`,
+   `/api/v1/recommendations`, and `/api/v1/cycles/{cycle_id}`. Confirm every response has
+   `data_mode: "replay"` and the returned objects are coherent with the loader result.
+4. Fetch the Medical Center timeline with `GET /api/v1/forecasts/zones/{zone_id}`. Confirm early entries are
+   `watch`, later entries are `high`, and the final entry is `critical`. Confirm the final high/critical forecast
+   can produce the bounded, human-review recommendation and no operational action occurs.
+5. Call `POST /api/v1/demo/run-cycle` with no body. Confirm it completes/reuses the offline replay path and does
+   not need valid EIA/FortyGuard keys. Repeat `POST /api/v1/demo/load-replay` to confirm duplicate-safe reuse.
+6. Set `REPLAY_MODE=false` and restart. Confirm `/api/v1/demo/load-replay` returns `409 replay_mode_disabled`,
+   while `/api/v1/demo/run-cycle` again requires the normal safe live heatmap request body. Restore your desired
+   local setting afterward.
+
+### Known boundary for the next phase
+
+- The repository does not contain a completed real-provider capture, so the committed numbers are clearly labeled
+  deterministic representative replay data. An approved scrubbed FortyGuard/EIA capture can replace those values
+  later without changing the replay contract.
+- Phase 13 will expose the already-persisted audit history, document the final API contract and end-to-end runbook,
+  review CORS and error hardening, and execute the full fresh-database/production-style QA pack.
 
 ## Secrets reminder
 

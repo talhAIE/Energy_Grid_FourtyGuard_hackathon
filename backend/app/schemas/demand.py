@@ -4,6 +4,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+from app.schemas.common import DataModeResponse
+
 
 class EiaImportRequest(BaseModel):
     """A bounded historical time range for a configured EIA demand import."""
@@ -35,10 +37,10 @@ class EiaImportResultData(BaseModel):
     skipped_duplicate_count: int
 
 
-class EiaImportResponse(BaseModel):
+class EiaImportResponse(DataModeResponse):
     data: EiaImportResultData
 
 
-class DemandObservationListResponse(BaseModel):
+class DemandObservationListResponse(DataModeResponse):
     data: list[DemandObservationData]
     count: int

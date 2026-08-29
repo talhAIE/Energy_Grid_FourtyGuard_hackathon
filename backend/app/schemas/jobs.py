@@ -3,6 +3,8 @@ from uuid import UUID
 
 from pydantic import BaseModel
 
+from app.schemas.common import DataModeResponse
+
 
 class JobData(BaseModel):
     """Safe persisted job state. Raw provider responses remain server-side only."""
@@ -21,5 +23,5 @@ class JobData(BaseModel):
     raw_response_available: bool
 
 
-class JobResponse(BaseModel):
+class JobResponse(DataModeResponse):
     data: JobData
