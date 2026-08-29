@@ -403,3 +403,56 @@ formula. Scores use `low` (0-39), `watch` (40-64), `high` (65-79), and `critical
 6. Omit the prior-hour temperature for one zone or use a stale source retrieval time. Confirm the result remains
    explicitly visible with a lower confidence and a larger uncertainty penalty; partial/missing same-time
    temperature coverage must instead stop forecast creation with a readable error.
+
+## Phase 10 recommendations and human decisions
+
+Phase 10 is a decision-support layer only. It never sends a grid command, dispatches generation, changes a
+switch, or contacts a customer. After `POST /api/v1/forecast/run` produces the zone forecasts, the backend
+evaluates each one against explicit guardrails and returns its `recommendation_eligibility` reason code.
+
+A recommendation is created only when the forecast is a future proxy estimate, its temperature data is fresh,
+its confidence meets `RECOMMENDATION_MIN_CONFIDENCE`, and its risk score meets
+`RECOMMENDATION_MIN_RISK_SCORE` (default: 65 / `high`). Stale or low-confidence forecasts create no action
+recommendation. Their reason is returned by the forecast response and recorded in the audit trail.
+
+The fixed action catalogue is deliberately bounded:
+
+- `watch`: monitor and schedule a re-check.
+- `high`: verify reserve capacity and prepare voluntary demand-response options.
+- `critical`: escalate to the duty operator and review the approved response plan.
+
+Recommendations expire at the earlier of `RECOMMENDATION_EXPIRY_MINUTES` (default 120 minutes) and their
+forecast time. A newer zone forecast supersedes an older pending recommendation for that zone. A human can make
+exactly one immutable `approved`, `rejected`, or `deferred` decision; recording a decision does not execute the
+proposed action.
+
+1. Apply the recommendation migration:
+
+   ```powershell
+   alembic upgrade head
+   ```
+
+2. Generate a future high/critical, fresh, sufficiently confident zone forecast with
+   `POST /api/v1/forecast/run`. Confirm the response reports `recommendations_created_count` and an `eligible`
+   entry for the qualifying zone.
+
+3. Call `GET /api/v1/recommendations`. It returns pending recommendations by default, including structured
+   reason/evidence, expiry, risk, action code, and a plain safety boundary. Add `include_inactive=true` to read
+   prior decisions, expired items, or superseded recommendations; use `status=<value>` to filter a known state.
+
+4. Record a test decision with `POST /api/v1/recommendations/{recommendation_id}/decision`:
+
+   ```json
+   {
+     "decision": "approved",
+     "operator_name": "Demo Operator",
+     "note": "Reviewed the forecast evidence."
+   }
+   ```
+
+   Expected: a `201` response containing the immutable decision record. Repeating the request for the same
+   recommendation returns `409 recommendation_not_decidable`; no operational action is performed.
+
+5. Use a stale or low-confidence zone forecast. Confirm `recommendations_created_count` is zero for that zone,
+   `recommendation_eligibility` exposes `stale_temperature_data` or `insufficient_confidence`, and no pending
+   recommendation appears in the list.

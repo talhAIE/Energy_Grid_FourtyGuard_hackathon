@@ -4,6 +4,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from app.schemas.recommendations import RecommendationEligibilityData
+
 
 class ForecastRunRequest(BaseModel):
     """Optional requested UTC forecast slot; omit it to use the next available temperature slot."""
@@ -50,6 +52,9 @@ class ForecastRunData(BaseModel):
     lag_demand_24h_mw: Decimal
     zone_forecast_count: int
     zone_forecasts_reused: bool
+    recommendations_created_count: int
+    recommendations_reused_count: int
+    recommendation_eligibility: list[RecommendationEligibilityData]
 
 
 class ForecastRunResponse(BaseModel):

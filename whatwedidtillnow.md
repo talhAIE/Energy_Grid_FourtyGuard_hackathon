@@ -33,7 +33,8 @@ This file tracks completed work and how it was implemented. Update it at the end
 | 7 - Feature dataset | Implemented; manual dataset QA pending | Versioned CSV/quality report, UTC/local time alignment, Cooling Degree Hours, calendar features, and explicit missing-temperature labels |
 | 8 - Baseline demand model | Implemented; manual model/database QA pending | Chronological OLS training, stored metrics/model versions, JSON artifact, validation export, and safeguarded city forecast API |
 | 9 - Zone risk forecast | Implemented; manual model/database QA pending | Heat-adjusted proxy zone allocation, persisted explainable risk scores, confidence/freshness signals, and zone forecast APIs |
-| 10-13 | Not started | Recommendations, scheduler, replay mode, and QA pack |
+| 10 - Recommendations and approvals | Implemented; manual model/database QA pending | Guarded recommendations, bounded action catalogue, immutable human decisions, expiry/supersession, and audit trail |
+| 11-13 | Not started | Scheduler, replay mode, and QA pack |
 
 ## Phase 0 - Foundation details
 
@@ -542,8 +543,71 @@ baseline model, complete future zone temperatures, and actual EIA demand at the 
 
 ### Known boundary for the next phase
 
-- Phase 9 provides traceable proxy risk forecasts only. It does not create recommendations, contact operators,
-  or control grid equipment. Phase 10 adds the separately guarded human approval workflow.
+- Resolved in Phase 10: traceable proxy risk forecasts can now create a separately guarded recommendation for
+  human review. No recommendation performs an external or grid-control action.
+
+## Phase 10 - Recommendation and safety-guardrail engine details
+
+### How it was implemented
+
+- Added `recommendations`, `recommendation_decisions`, and Alembic migration `20260829_0008`. A recommendation
+  references exactly one zone forecast; a database uniqueness rule and one-decision-per-recommendation rule
+  prevent duplicate active recommendations and conflicting decisions.
+- Added a fixed, code-owned action catalogue. `watch` only monitors/re-checks, `high` verifies reserve capacity
+  and prepares voluntary demand response, and `critical` escalates/reviews an approved plan. Every action carries
+  an explicit safety boundary stating that no grid, market, customer, or equipment action is executed.
+- Updated `POST /api/v1/forecast/run` to evaluate every newly generated or reused zone forecast immediately.
+  It exposes recommendation creation/reuse counts and one structured eligibility result per zone.
+- Eligibility requires a future proxy forecast, fresh temperature source, confidence at or above the configured
+  minimum (`medium` by default), and a risk score at or above the configured minimum (`65`, high risk, by
+  default). An ineligible zone creates no recommendation; its explicit reason code is returned and appended as a
+  `recommendation.ineligible` audit event.
+- Recommendation reasons and evidence are structured JSON derived from persisted risk inputs—not free-form model
+  text. Evidence retains proxy MW, temperature/ramp/anomaly, uplift, uncertainty, and the Phase 9 risk formula.
+- Recommendations expire at the earlier of their forecast time and the configured 120-minute default. Reads and
+  decision attempts safely persist expiry events. A newer zone forecast supersedes any older pending recommendation
+  for the same zone, including when the newer forecast becomes ineligible.
+- Added `GET /api/v1/recommendations` for pending recommendations by default, with explicit status/history
+  options, and `POST /api/v1/recommendations/{id}/decision` for one immutable human `approved`, `rejected`, or
+  `deferred` decision. The latter only records a decision; it never executes the recommendation.
+- Added audit events for creation, ineligibility, expiry, supersession, and every decision. Decision audit data
+  includes only the operator name, decision value, and whether a note exists—not the note text.
+
+### Verification performed
+
+- Python compilation and Ruff checks pass for the full backend, including new recommendation routes, schemas,
+  models, services, and migrations.
+- FastAPI OpenAPI generation confirms `GET /api/v1/recommendations` and
+  `POST /api/v1/recommendations/{recommendation_id}/decision` are registered.
+- SQLAlchemy metadata confirms both recommendation tables are registered, and Alembic reports
+  `20260829_0008` as the single migration head.
+
+### Manual QA still required
+
+This requires Phase 9's migrated PostGIS database with a fresh, future, high/critical zone forecast and its
+active baseline-model prerequisites. Do not paste API keys into chat or commit `backend/.env`.
+
+1. Run `alembic upgrade head`, then use `POST /api/v1/forecast/run` with a qualifying future forecast. Confirm a
+   high/critical eligible zone increases `recommendations_created_count` and has `reason_code: "eligible"`.
+2. Call `GET /api/v1/recommendations`. Confirm the recommendation has a zone forecast ID, proxy marker, risk,
+   structured evidence/reason, bounded action, `pending` status, and an expiry no later than forecast time.
+3. Submit `POST /api/v1/recommendations/{id}/decision` with a test operator and `approved`, `rejected`, or
+   `deferred`. Confirm a `201` decision record and `GET /api/v1/recommendations?include_inactive=true` reflects
+   the final recommendation state.
+4. Submit another decision for the same recommendation. Confirm `409 recommendation_not_decidable` and only one
+   `recommendation_decisions` database row/audit event.
+5. Use stale and low-confidence forecasts. Confirm no pending recommendation is created, the forecast response
+   exposes `stale_temperature_data` or `insufficient_confidence`, and an ineligibility audit event is present.
+6. Create a new forecast for a zone with an existing pending recommendation. Confirm the older item is
+   `superseded`; if the new forecast is eligible it gets one new pending recommendation, otherwise no action
+   recommendation remains pending for that zone.
+7. Set a short local `RECOMMENDATION_EXPIRY_MINUTES`, wait until expiry, then list or try to decide the item.
+   Confirm it becomes `expired`, emits an audit event, and cannot receive a decision.
+
+### Known boundary for the next phase
+
+- Phase 10 provides human-supervised recommendation records only. It does not schedule provider calls, run an
+  automated cycle, send notifications, or control equipment. Phase 11 adds safe manual/scheduled orchestration.
 
 ## Secrets reminder
 

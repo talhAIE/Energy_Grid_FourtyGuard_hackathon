@@ -6,6 +6,7 @@ from app.api.v1.forecasts import router as forecasts_router
 from app.api.v1.health import router as health_router
 from app.api.v1.heatmaps import router as heatmaps_router
 from app.api.v1.jobs import router as jobs_router
+from app.api.v1.recommendations import router as recommendations_router
 from app.api.v1.temperatures import router as temperatures_router
 from app.api.v1.zones import router as zones_router
 
@@ -16,5 +17,10 @@ api_router.include_router(forecast_router, prefix="/forecast", tags=["forecast"]
 api_router.include_router(forecasts_router, prefix="/forecasts", tags=["zone forecasts"])
 api_router.include_router(heatmaps_router, prefix="/heatmaps", tags=["heatmaps"])
 api_router.include_router(jobs_router, prefix="/jobs", tags=["jobs"])
+api_router.include_router(
+    recommendations_router,
+    prefix="/recommendations",
+    tags=["recommendations"],
+)
 api_router.include_router(temperatures_router, prefix="/temperatures", tags=["temperatures"])
 api_router.include_router(zones_router, prefix="/zones", tags=["zones"])

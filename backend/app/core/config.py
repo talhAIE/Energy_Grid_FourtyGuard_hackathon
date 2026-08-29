@@ -79,6 +79,22 @@ class Settings(BaseSettings):
         le=1_440,
         validation_alias="ZONE_FORECAST_MAX_TEMPERATURE_AGE_MINUTES",
     )
+    recommendation_min_risk_score: Decimal = Field(
+        default=Decimal("65"),
+        ge=0,
+        le=100,
+        validation_alias="RECOMMENDATION_MIN_RISK_SCORE",
+    )
+    recommendation_min_confidence: Literal["medium", "high"] = Field(
+        default="medium",
+        validation_alias="RECOMMENDATION_MIN_CONFIDENCE",
+    )
+    recommendation_expiry_minutes: int = Field(
+        default=120,
+        ge=5,
+        le=720,
+        validation_alias="RECOMMENDATION_EXPIRY_MINUTES",
+    )
     eia_base_url: str = Field(default="https://api.eia.gov/v2", validation_alias="EIA_BASE_URL")
     eia_api_key: str | None = Field(default=None, validation_alias="EIA_API_KEY")
     eia_demand_route: str = Field(

@@ -16,6 +16,7 @@ from app.services.forecast_model_service import (
     get_active_model_summary,
     run_city_forecast,
 )
+from app.services.recommendation_service import RecommendationError, generate_recommendations
 from app.services.zone_forecast_service import ZoneForecastError, generate_zone_forecasts
 
 router = APIRouter()
@@ -50,6 +51,10 @@ def post_forecast_run(
     try:
         result = run_city_forecast(session=session, forecast_for=payload.forecast_for)
         zone_result = generate_zone_forecasts(session=session, city_forecast=result)
+        recommendation_result = generate_recommendations(
+            session=session,
+            zone_forecasts=zone_result.forecasts,
+        )
     except ModelNotAvailableError as exc:
         raise _http_error(
             status.HTTP_503_SERVICE_UNAVAILABLE, "model_not_available", str(exc)
@@ -68,11 +73,18 @@ def post_forecast_run(
         raise _http_error(
             status.HTTP_422_UNPROCESSABLE_ENTITY, "zone_forecast_input_not_ready", str(exc)
         ) from exc
+    except RecommendationError as exc:
+        raise _http_error(
+            status.HTTP_422_UNPROCESSABLE_ENTITY, "recommendation_generation_failed", str(exc)
+        ) from exc
     return ForecastRunResponse(
         data=ForecastRunData(
             **result.__dict__,
             zone_forecast_count=len(zone_result.forecasts),
             zone_forecasts_reused=zone_result.reused,
+            recommendations_created_count=recommendation_result.created_count,
+            recommendations_reused_count=recommendation_result.reused_count,
+            recommendation_eligibility=recommendation_result.eligibility,
         )
     )
 
