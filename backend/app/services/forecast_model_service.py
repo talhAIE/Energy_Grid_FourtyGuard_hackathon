@@ -317,7 +317,36 @@ def bootstrap_demand_history_model(
         select(ModelVersion).where(ModelVersion.city_id == city.id, ModelVersion.version == version)
     )
     if existing is not None:
+        # Model metadata is stored in the shared database, but generated files live
+        # on the current host. Recreate this deterministic bootstrap artifact when
+        # the app starts on a new machine or a fresh Render instance instead of
+        # retaining a path from a developer workstation or an older container.
+        _write_model_artifacts(
+            artifact_path=artifact_path,
+            validation_path=validation_path,
+            version=version,
+            source_dataset_version="eia-ercot-live-history",
+            dataset_sha256=dataset_sha256,
+            coefficients=coefficients,
+            intercept=intercept,
+            train_examples=train_examples,
+            validation_predictions=validation_predictions,
+            mae_mw=mae_mw,
+            rmse_mw=rmse_mw,
+            mape_percent=mape_percent,
+            algorithm=BOOTSTRAP_ALGORITHM,
+            quality_policy=BOOTSTRAP_QUALITY_POLICY,
+        )
+        existing.artifact_path = str(artifact_path.resolve())
+        existing.validation_predictions_path = str(validation_path.resolve())
         _activate_model(session=session, city_id=city.id, model=existing)
+        record_audit_event(
+            session,
+            event_type="model.bootstrap_artifact_restored",
+            entity_type="model_version",
+            entity_id=existing.id,
+            payload={"version": existing.version, "reason": "runtime_artifact_recreated"},
+        )
         session.commit()
         return _training_result(existing, reused_existing_version=True)
     _write_model_artifacts(
