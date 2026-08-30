@@ -18,7 +18,13 @@ def get_engine() -> Engine | None:
     database_url = get_settings().database_url
     if not database_url:
         return None
-    return create_engine(database_url, pool_pre_ping=True)
+    return create_engine(
+        database_url,
+        pool_pre_ping=True,
+        pool_recycle=300,
+        pool_size=5,
+        max_overflow=10,
+    )
 
 
 @lru_cache
