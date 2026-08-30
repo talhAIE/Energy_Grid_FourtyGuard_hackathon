@@ -595,6 +595,10 @@ port 8000; use either it or the local reload process, not both at once.
 
 1. Set a production `APP_ENV`, a production `DATABASE_URL`, exact HTTPS `CORS_ALLOWED_ORIGINS`, and the required
    provider keys through the deployment secret manager—not Git or a request body.
+   When Render connects to Supabase over IPv4, use the **Shared Pooler — Transaction mode** connection string from
+   Supabase's **Connect** dialog (port `6543`), not the session-mode string on port `5432`. The backend detects that
+   endpoint and uses `NullPool` with Psycopg prepared statements disabled, which avoids exhausting Supabase's small
+   session-client allowance. URL-encode any reserved characters in the password.
 2. Run `alembic upgrade head` against the target PostGIS database before routing traffic to the new API version.
 3. Start with `python -m uvicorn app.main:app --host 0.0.0.0 --port 8000` (or the equivalent managed-process
    command), then probe `/api/v1/health`.
@@ -607,7 +611,7 @@ port 8000; use either it or the local reload process, not both at once.
 | Symptom | Check |
 | --- | --- |
 | `503 database_not_configured` | Set a valid local `DATABASE_URL`, then restart the API. |
-| Health reports database `unavailable` | Start PostGIS, verify the database credentials locally, and rerun `alembic upgrade head`. |
+| Health reports database `unavailable` | Start PostGIS, verify the database credentials locally, and rerun `alembic upgrade head`. On Render + Supabase, use the transaction-pooler URL on port `6543`, redeploy/restart Render, then recheck `/api/v1/health`. |
 | `503 eia_not_configured` or `fortyguard_not_configured` | Add the relevant key only to ignored `.env`, restart, and never include it in an API request. |
 | Replay loader returns `409 replay_mode_disabled` | Set `APP_ENV=development` and `REPLAY_MODE=true`, restart, then migrate the database. |
 | Browser request is blocked by CORS | Add the frontend’s exact scheme/host/port to `CORS_ALLOWED_ORIGINS`; do not use `*`. |
