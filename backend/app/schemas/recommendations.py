@@ -27,6 +27,9 @@ class RecommendationActionData(BaseModel):
     code: RecommendationActionCode
     label: str
     safety_boundary: str
+    urgency: Literal["monitor", "prepare", "escalate"]
+    response_window: str
+    steps: list[str]
 
 
 class RecommendationData(BaseModel):

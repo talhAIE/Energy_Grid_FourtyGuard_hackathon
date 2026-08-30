@@ -757,6 +757,9 @@ blank in ignored `backend/.env`.
 - Added predictable safe infrastructure and input errors. Missing database configuration now returns
   `503 database_not_configured`; database failures return `503 database_unavailable`; malformed requests return a
   safe `422 invalid_request` envelope without echoing submitted values.
+- Fixed the zone seed/runtime GeoJSON round-trip to accept Shapely's tuple-based coordinate collections as well as
+  JSON list collections. This prevents `seed_zones` from failing after a successful Supabase insert while it
+  prepares the map-safe zone response.
 - Added a restrictive comma-separated `CORS_ALLOWED_ORIGINS` setting. The default permits only local frontend
   origins on ports 3000, allows only `GET`/`POST` with `Content-Type`, does not allow credentials, and does not use
   wildcard origins.
@@ -776,6 +779,8 @@ blank in ignored `backend/.env`.
 - FastAPI OpenAPI generation confirms the audit route, readable tags, safe response schemas, `data_mode`, and list
   pagination fields are registered.
 - The production-style Uvicorn command successfully starts the application at `127.0.0.1:8013`.
+- GeoJSON round-trip verification confirms normalized Polygon/MultiPolygon coordinates remain valid after Shapely
+  serialization, which keeps the idempotent zone seed compatible with Supabase/PostGIS geometry reads.
 - Alembic reports `20260829_0009` as the sole migration head. No new database migration is required because Phase
   13 reads existing audit records and adds no persisted fields.
 

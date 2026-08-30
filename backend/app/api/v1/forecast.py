@@ -9,6 +9,7 @@ from app.schemas.forecasts import (
     ForecastRunRequest,
     ForecastRunResponse,
 )
+from app.schemas.recommendations import RecommendationEligibilityData
 from app.services.forecast_model_service import (
     ForecastInputError,
     ModelArtifactError,
@@ -84,7 +85,10 @@ def post_forecast_run(
             zone_forecasts_reused=zone_result.reused,
             recommendations_created_count=recommendation_result.created_count,
             recommendations_reused_count=recommendation_result.reused_count,
-            recommendation_eligibility=recommendation_result.eligibility,
+            recommendation_eligibility=[
+                RecommendationEligibilityData(**item.__dict__)
+                for item in recommendation_result.eligibility
+            ],
         )
     )
 

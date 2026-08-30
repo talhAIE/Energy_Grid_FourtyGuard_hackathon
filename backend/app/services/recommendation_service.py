@@ -10,6 +10,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
+from app.db.models.model_version import ModelVersion
 from app.db.models.recommendation import Recommendation
 from app.db.models.recommendation_decision import RecommendationDecision
 from app.db.models.zone_forecast import ZoneForecast
@@ -25,21 +26,38 @@ class ActionDefinition:
     code: str
     label: str
     safety_boundary: str
+    urgency: Literal["monitor", "prepare", "escalate"]
+    response_window: str
+    steps: tuple[str, ...]
 
 
 ACTION_CATALOG: dict[str, ActionDefinition] = {
     "watch": ActionDefinition(
         code="monitor_and_recheck",
-        label="Monitor conditions and schedule a re-check.",
+        label="Open a monitoring check and re-evaluate the next forecast interval.",
         safety_boundary=(
             "Observation only; no customer, market, or grid-control action is performed."
+        ),
+        urgency="monitor",
+        response_window="Re-check before the next forecast interval",
+        steps=(
+            "Confirm the zone temperature sample remains fresh.",
+            "Compare the new demand forecast with the current zone baseline.",
+            "Document any change that would require an operator review.",
         ),
     ),
     "high": ActionDefinition(
         code="verify_reserve_and_prepare_voluntary_demand_response",
-        label="Verify reserve capacity and prepare voluntary demand-response options.",
+        label="Verify reserve readiness and prepare a voluntary demand-response review.",
         safety_boundary=(
             "Preparation only; any operational or customer action requires separate approval."
+        ),
+        urgency="prepare",
+        response_window="Begin readiness review during this forecast window",
+        steps=(
+            "Notify the duty operator that a high-risk zone forecast is available.",
+            "Verify reserve and response-plan readiness using approved operating procedures.",
+            "Prepare voluntary demand-response options for a separate human decision.",
         ),
     ),
     "critical": ActionDefinition(
@@ -47,6 +65,13 @@ ACTION_CATALOG: dict[str, ActionDefinition] = {
         label="Escalate to the duty operator and review the approved response plan.",
         safety_boundary=(
             "Escalation and review only; this service never dispatches or controls equipment."
+        ),
+        urgency="escalate",
+        response_window="Immediate operator review",
+        steps=(
+            "Escalate the forecast and evidence to the duty operator.",
+            "Review the approved response plan and available operating constraints.",
+            "Record an explicit approve, reject, or defer decision in the audit trail.",
         ),
     ),
 }
@@ -120,10 +145,12 @@ def generate_recommendations(
             reused_count += 1
             continue
 
+        model = session.get(ModelVersion, forecast.model_version_id)
         result = evaluate_recommendation_eligibility(
             forecast=forecast,
             now=now,
             settings=settings,
+            model_quality_policy=model.quality_policy if model is not None else None,
         )
         eligibility.append(result)
         _supersede_prior_pending_recommendations(
@@ -194,10 +221,13 @@ def evaluate_recommendation_eligibility(
     forecast: ZoneForecast,
     now: datetime,
     settings: Settings,
+    model_quality_policy: str | None = None,
 ) -> RecommendationEligibility:
     """Return the first explicit policy reason; recommendations require every guardrail to pass."""
     reason_code = "eligible"
-    if forecast.estimate_type != "proxy":
+    if model_quality_policy != "complete_temperature_only":
+        reason_code = "model_not_calibrated"
+    elif forecast.estimate_type != "proxy":
         reason_code = "unsupported_estimate_type"
     elif _ensure_utc(forecast.forecast_for) <= now:
         reason_code = "forecast_not_future"

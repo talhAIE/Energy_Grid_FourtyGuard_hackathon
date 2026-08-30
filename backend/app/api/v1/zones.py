@@ -3,7 +3,17 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.db.database import get_db_session
-from app.schemas.zones import ZoneCreate, ZoneListResponse, ZoneResponse
+from app.schemas.zones import (
+    OperationalGridRequest,
+    OperationalGridResponse,
+    ZoneCreate,
+    ZoneListResponse,
+    ZoneResponse,
+)
+from app.services.operational_grid_service import (
+    OperationalGridError,
+    activate_operational_grid,
+)
 from app.services.zone_service import (
     ZoneConflictError,
     ZoneNotReadyError,
@@ -70,3 +80,42 @@ def post_zone(
         ) from exc
 
     return ZoneResponse(data=zone)
+
+
+@router.post(
+    "/operational-grid",
+    response_model=OperationalGridResponse,
+    summary="Activate an approved 4–12 zone operational grid",
+)
+def post_operational_grid(
+    payload: OperationalGridRequest,
+    session: Session = Depends(get_db_session),
+) -> OperationalGridResponse:
+    """Activate a provider-size-validated grid without provider calls or dispatch actions."""
+    if get_settings().app_env.lower() not in {"development", "test"}:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "zone_plan_activation_disabled",
+                "message": "Operational-grid activation is development-only.",
+            },
+        )
+    try:
+        result = activate_operational_grid(
+            session=session,
+            columns=payload.columns,
+            rows=payload.rows,
+        )
+    except OperationalGridError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "invalid_operational_grid", "message": str(exc)},
+        ) from exc
+    return OperationalGridResponse(
+        data={
+            "active_zone_count": result.active_zone_count,
+            "deactivated_zone_count": result.deactivated_zone_count,
+            "columns": result.columns,
+            "rows": result.rows,
+        }
+    )

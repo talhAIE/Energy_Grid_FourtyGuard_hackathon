@@ -25,6 +25,7 @@ from app.services.audit_service import record_audit_event
 from app.services.feature_dataset_service import FEATURE_SCHEMA_VERSION, _us_federal_holidays
 
 ALGORITHM = "ordinary_least_squares_linear_regression_v1"
+BOOTSTRAP_ALGORITHM = "ordinary_least_squares_demand_history_bootstrap_v1"
 ARTIFACT_SCHEMA_VERSION = "1"
 FEATURE_COLUMNS = (
     "cooling_degree_hours",
@@ -37,6 +38,7 @@ FEATURE_COLUMNS = (
     "lag_demand_24h_mw",
 )
 QUALITY_POLICY = "complete_temperature_only"
+BOOTSTRAP_QUALITY_POLICY = "demand_history_only_bootstrap"
 METRIC_SCALE = Decimal("0.001")
 
 
@@ -238,6 +240,143 @@ def train_baseline_model(
             "mae_mw": _decimal_text(model.mae_mw),
             "rmse_mw": _decimal_text(model.rmse_mw),
             "mape_percent": _decimal_text(model.mape_percent),
+        },
+    )
+    session.commit()
+    return _training_result(model, reused_existing_version=False)
+
+
+def bootstrap_demand_history_model(
+    session: Session,
+    *,
+    settings: Settings | None = None,
+) -> ModelTrainingResult:
+    """Fit a clearly labelled temporary baseline from live EIA history.
+
+    This keeps the dashboard usable while a complete weather-history training set is
+    collected.  Its cooling-degree feature is deliberately fixed at zero, so it is
+    not presented as a calibrated weather/demand model and cannot create actions.
+    """
+    settings = settings or get_settings()
+    city = _get_demo_city(session=session, settings=settings)
+    observations = session.scalars(
+        select(DemandObservation)
+        .where(DemandObservation.city_id == city.id, DemandObservation.is_actual.is_(True))
+        .order_by(DemandObservation.period_utc)
+    ).all()
+    actual_demand = {
+        _ensure_utc(item.period_utc): float(item.demand_mw)
+        for item in observations
+    }
+    examples: list[TrainingExample] = []
+    for period, demand in actual_demand.items():
+        lag_one = actual_demand.get(period - timedelta(hours=1))
+        lag_day = actual_demand.get(period - timedelta(hours=24))
+        if lag_one is None or lag_day is None:
+            continue
+        local_time = period.astimezone(_timezone(settings.demo_timezone))
+        examples.append(
+            TrainingExample(
+                period_utc=period,
+                target_demand_mw=demand,
+                feature_values=(
+                    0.0,
+                    float(local_time.hour),
+                    float(local_time.weekday()),
+                    float(local_time.weekday() >= 5),
+                    float(local_time.month),
+                    float(local_time.date() in _us_federal_holidays(local_time.year)),
+                    lag_one,
+                    lag_day,
+                ),
+            )
+        )
+    train_examples, validation_examples = _chronological_split(examples=examples, settings=settings)
+    coefficients, intercept = _fit_ordinary_least_squares(train_examples)
+    validation_predictions = _predict_examples(
+        examples=validation_examples,
+        coefficients=coefficients,
+        intercept=intercept,
+    )
+    mae_mw, rmse_mw, mape_percent = _metrics(validation_predictions)
+    dataset_sha256 = hashlib.sha256(
+        json.dumps(
+            [
+                (item.period_utc.isoformat(), str(item.demand_mw), item.source)
+                for item in observations
+            ],
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    version = _bootstrap_model_version(
+        dataset_sha256=dataset_sha256,
+        validation_fraction=settings.model_validation_fraction,
+    )
+    artifact_path, validation_path = _artifact_paths(settings=settings, version=version)
+    existing = session.scalar(
+        select(ModelVersion).where(ModelVersion.city_id == city.id, ModelVersion.version == version)
+    )
+    if existing is not None:
+        _activate_model(session=session, city_id=city.id, model=existing)
+        session.commit()
+        return _training_result(existing, reused_existing_version=True)
+    _write_model_artifacts(
+        artifact_path=artifact_path,
+        validation_path=validation_path,
+        version=version,
+        source_dataset_version="eia-ercot-live-history",
+        dataset_sha256=dataset_sha256,
+        coefficients=coefficients,
+        intercept=intercept,
+        train_examples=train_examples,
+        validation_predictions=validation_predictions,
+        mae_mw=mae_mw,
+        rmse_mw=rmse_mw,
+        mape_percent=mape_percent,
+        algorithm=BOOTSTRAP_ALGORITHM,
+        quality_policy=BOOTSTRAP_QUALITY_POLICY,
+    )
+    model = ModelVersion(
+        city_id=city.id,
+        version=version,
+        algorithm=BOOTSTRAP_ALGORITHM,
+        feature_schema_version=FEATURE_SCHEMA_VERSION,
+        feature_columns=list(FEATURE_COLUMNS),
+        quality_policy=BOOTSTRAP_QUALITY_POLICY,
+        source_dataset_version="eia-ercot-live-history",
+        training_data_sha256=dataset_sha256,
+        trained_from=train_examples[0].period_utc,
+        trained_to=validation_examples[-1].period_utc,
+        training_row_count=len(train_examples),
+        validation_row_count=len(validation_examples),
+        mae_mw=mae_mw,
+        rmse_mw=rmse_mw,
+        mape_percent=mape_percent,
+        artifact_path=str(artifact_path.resolve()),
+        validation_predictions_path=str(validation_path.resolve()),
+        artifact_metadata={
+            "artifact_schema_version": ARTIFACT_SCHEMA_VERSION,
+            "validation_fraction": settings.model_validation_fraction,
+            "feature_columns": list(FEATURE_COLUMNS),
+            "bootstrap": True,
+        },
+        is_active=True,
+        activated_at=datetime.now(UTC),
+    )
+    _activate_model(session=session, city_id=city.id, model=model)
+    session.add(model)
+    session.flush()
+    record_audit_event(
+        session,
+        event_type="model.bootstrap_trained",
+        entity_type="model_version",
+        entity_id=model.id,
+        payload={
+            "version": model.version,
+            "source": "live_eia_history",
+            "quality_policy": BOOTSTRAP_QUALITY_POLICY,
+            "training_row_count": model.training_row_count,
+            "validation_row_count": model.validation_row_count,
         },
     )
     session.commit()
@@ -505,6 +644,22 @@ def _model_version(*, dataset_sha256: str, validation_fraction: float) -> str:
     return f"baseline-ols-v1-{hashlib.sha256(fingerprint.encode('utf-8')).hexdigest()[:12]}"
 
 
+def _bootstrap_model_version(*, dataset_sha256: str, validation_fraction: float) -> str:
+    fingerprint = json.dumps(
+        {
+            "algorithm": BOOTSTRAP_ALGORITHM,
+            "artifact_schema_version": ARTIFACT_SCHEMA_VERSION,
+            "dataset_sha256": dataset_sha256,
+            "feature_columns": FEATURE_COLUMNS,
+            "quality_policy": BOOTSTRAP_QUALITY_POLICY,
+            "validation_fraction": validation_fraction,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return f"bootstrap-ols-v1-{hashlib.sha256(fingerprint.encode('utf-8')).hexdigest()[:12]}"
+
+
 def _artifact_paths(*, settings: Settings, version: str) -> tuple[Path, Path]:
     output_dir = Path(settings.model_artifact_dir)
     return output_dir / f"{version}.json", output_dir / f"{version}.validation.csv"
@@ -524,15 +679,17 @@ def _write_model_artifacts(
     mae_mw: Decimal,
     rmse_mw: Decimal,
     mape_percent: Decimal | None,
+    algorithm: str = ALGORITHM,
+    quality_policy: str = QUALITY_POLICY,
 ) -> None:
     artifact_path.parent.mkdir(parents=True, exist_ok=True)
     artifact = {
         "artifact_schema_version": ARTIFACT_SCHEMA_VERSION,
         "version": version,
-        "algorithm": ALGORITHM,
+        "algorithm": algorithm,
         "feature_schema_version": FEATURE_SCHEMA_VERSION,
         "feature_columns": list(FEATURE_COLUMNS),
-        "quality_policy": QUALITY_POLICY,
+        "quality_policy": quality_policy,
         "source_dataset_version": source_dataset_version,
         "training_data_sha256": dataset_sha256,
         "intercept": intercept,

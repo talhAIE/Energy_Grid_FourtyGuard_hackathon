@@ -22,6 +22,21 @@ class ZoneCreate(BaseModel):
         return value.strip().upper() if isinstance(value, str) else value
 
 
+class OperationalGridRequest(BaseModel):
+    """A bounded, approved planning-grid request for the demo analysis boundary."""
+
+    columns: int = Field(default=4, ge=1, le=6)
+    rows: int = Field(default=2, ge=1, le=6)
+
+    @field_validator("rows")
+    @classmethod
+    def validate_zone_count(cls, rows: int, info) -> int:
+        columns = info.data.get("columns", 6)
+        if not 4 <= columns * rows <= 12:
+            raise ValueError("columns × rows must create between 4 and 12 operational zones.")
+        return rows
+
+
 class ZoneData(BaseModel):
     """Public zone representation consumed by the future map dashboard."""
 
@@ -40,3 +55,7 @@ class ZoneResponse(DataModeResponse):
 
 class ZoneListResponse(DataModeResponse):
     data: list[ZoneData]
+
+
+class OperationalGridResponse(DataModeResponse):
+    data: dict[str, int]

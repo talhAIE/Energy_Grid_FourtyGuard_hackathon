@@ -67,7 +67,9 @@ def poll_heatmap_job(
     )
     if job is None:
         raise JobNotFoundError("The requested job was not found.")
-    if job.status in TERMINAL_JOB_STATUSES:
+    if job.status in TERMINAL_JOB_STATUSES and not (
+        job.status == "completed" and job.error_code == "normalization_failed"
+    ):
         return _to_job_data(job)
     if job.provider != "fortyguard" or job.operation != "heatmap":
         raise ValueError("This job is not a FortyGuard heatmap job.")

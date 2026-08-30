@@ -22,6 +22,7 @@ from app.services.audit_service import record_audit_event
 from app.services.zone_geometry import ZoneGeometryError, normalize_geojson_geometry
 
 TEMPERATURE_PROPERTY_NAMES = (
+    "average_temperature",
     "temperature_c",
     "temperature",
     "temp_c",

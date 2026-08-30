@@ -51,15 +51,15 @@ def _extract_geometry(value: dict[str, Any]) -> dict[str, Any]:
 
 def _validate_coordinates(geometry: dict[str, Any]) -> None:
     coordinates = geometry.get("coordinates")
-    if not isinstance(coordinates, list) or not coordinates:
+    if not isinstance(coordinates, list | tuple) or not coordinates:
         raise ZoneGeometryError("Geometry coordinates are required.")
 
     polygons = [coordinates] if geometry["type"] == "Polygon" else coordinates
     for polygon in polygons:
-        if not isinstance(polygon, list) or not polygon:
+        if not isinstance(polygon, list | tuple) or not polygon:
             raise ZoneGeometryError("Each polygon must include at least one linear ring.")
         for ring in polygon:
-            if not isinstance(ring, list) or len(ring) < 4:
+            if not isinstance(ring, list | tuple) or len(ring) < 4:
                 raise ZoneGeometryError("Each linear ring must contain at least four positions.")
             if ring[0] != ring[-1]:
                 raise ZoneGeometryError(
