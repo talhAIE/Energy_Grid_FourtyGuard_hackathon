@@ -14,6 +14,7 @@ from app.db.models.demand_observation import DemandObservation
 from app.db.models.zone import Zone
 from app.schemas.heatmaps import HeatmapDateTime, HeatmapJobData, HeatmapSubmitRequest
 from app.services.forecast_model_service import (
+    BOOTSTRAP_QUALITY_POLICY,
     ModelNotAvailableError,
     bootstrap_demand_history_model,
     get_active_model_summary,
@@ -63,7 +64,15 @@ def prepare_live_dashboard(
     target_time = _next_forecast_time(session=session, city=city, settings=settings)
     try:
         active_model = get_active_model_summary(session=session, settings=settings)
-        model_reused = True
+        if active_model.quality_policy == BOOTSTRAP_QUALITY_POLICY:
+            # A bootstrap artifact is deterministic from stored demand history
+            # and must be recreated on each host when the metadata is shared
+            # through the database but generated files are not.
+            bootstrap = bootstrap_demand_history_model(session=session, settings=settings)
+            active_model = get_active_model_summary(session=session, settings=settings)
+            model_reused = bootstrap.reused_existing_version
+        else:
+            model_reused = True
     except ModelNotAvailableError:
         bootstrap = bootstrap_demand_history_model(session=session, settings=settings)
         active_model = get_active_model_summary(session=session, settings=settings)
